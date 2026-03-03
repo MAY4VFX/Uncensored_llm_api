@@ -18,11 +18,18 @@ interface Model {
   hf_likes?: number;
 }
 
-const statusColors: Record<string, string> = {
-  active: "bg-green-500/20 text-green-400",
-  pending: "bg-yellow-500/20 text-yellow-400",
-  deploying: "bg-blue-500/20 text-blue-400",
-  inactive: "bg-gray-500/20 text-gray-400",
+const statusDot: Record<string, string> = {
+  active: "bg-terminal-500",
+  pending: "bg-yellow-400",
+  deploying: "bg-blue-400",
+  inactive: "bg-surface-600",
+};
+
+const statusText: Record<string, string> = {
+  active: "text-terminal-400",
+  pending: "text-yellow-400",
+  deploying: "text-blue-400",
+  inactive: "text-surface-600",
 };
 
 export default function AdminPage() {
@@ -70,18 +77,21 @@ export default function AdminPage() {
     setDeploying(null);
   };
 
-  if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (loading) return <div className="text-surface-800 font-mono text-sm p-8">Loading...</div>;
 
   const pending = models.filter((m) => m.status === "pending");
   const active = models.filter((m) => m.status === "active");
   const other = models.filter((m) => !["pending", "active"].includes(m.status));
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-12">
-      <h1 className="text-3xl font-bold text-white mb-8">Admin Panel</h1>
+    <div className="max-w-7xl mx-auto px-6 py-16">
+      <p className="section-label mb-4">// System Administration</p>
+      <h1 className="text-3xl font-mono font-bold text-neutral-100 mb-8">
+        Admin Panel<span className="text-terminal-500 animate-blink">_</span>
+      </h1>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg p-3 mb-6">
+        <div className="border border-red-900 bg-red-950/30 text-red-400 text-xs font-mono p-3 mb-6">
           {error}
         </div>
       )}
@@ -89,20 +99,23 @@ export default function AdminPage() {
       {/* Pending Models */}
       {pending.length > 0 && (
         <section className="mb-10">
-          <h2 className="text-xl font-semibold text-yellow-400 mb-4">
-            Pending Approval ({pending.length})
-          </h2>
+          <p className="section-label mb-4">
+            // Pending Approval ({pending.length})
+          </p>
           <div className="space-y-3">
             {pending.map((m) => (
-              <div key={m.id} className="glass-card p-4 flex items-center justify-between">
+              <div key={m.id} className="border border-surface-400 bg-surface-100 p-4 flex items-center justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3">
-                    <h3 className="text-white font-medium">{m.display_name}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${statusColors[m.status]}`}>
-                      {m.status}
+                    <h3 className="text-neutral-100 font-mono font-bold">{m.display_name}</h3>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`inline-block w-1.5 h-1.5 ${statusDot[m.status] || "bg-surface-600"}`}></span>
+                      <span className={`text-xs font-mono uppercase tracking-[0.2em] ${statusText[m.status] || "text-surface-600"}`}>
+                        {m.status}
+                      </span>
                     </span>
                   </div>
-                  <p className="text-gray-400 text-sm mt-1">
+                  <p className="text-surface-800 text-sm font-mono mt-1">
                     {m.hf_repo} &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
                   </p>
                 </div>
@@ -121,27 +134,32 @@ export default function AdminPage() {
 
       {/* Active Models */}
       <section className="mb-10">
-        <h2 className="text-xl font-semibold text-green-400 mb-4">
-          Active Models ({active.length})
-        </h2>
+        <p className="section-label mb-4">
+          // Active Models ({active.length})
+        </p>
         {active.length === 0 ? (
-          <p className="text-gray-500">No active models yet.</p>
+          <div className="border border-surface-400 bg-surface-100 p-8 text-center">
+            <p className="text-surface-800 font-mono text-sm">No active models yet.</p>
+          </div>
         ) : (
           <div className="space-y-3">
             {active.map((m) => (
-              <div key={m.id} className="glass-card p-4 flex items-center justify-between">
+              <div key={m.id} className="border border-surface-400 bg-surface-100 p-4 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3">
-                    <h3 className="text-white font-medium">{m.display_name}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${statusColors[m.status]}`}>
-                      {m.status}
+                    <h3 className="text-neutral-100 font-mono font-bold">{m.display_name}</h3>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`inline-block w-1.5 h-1.5 ${statusDot[m.status] || "bg-surface-600"}`}></span>
+                      <span className={`text-xs font-mono uppercase tracking-[0.2em] ${statusText[m.status] || "text-surface-600"}`}>
+                        {m.status}
+                      </span>
                     </span>
                   </div>
-                  <p className="text-gray-400 text-sm mt-1">
+                  <p className="text-surface-800 text-sm font-mono mt-1">
                     {m.hf_repo} &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
                   </p>
                 </div>
-                <code className="text-gray-500 text-xs">{m.slug}</code>
+                <code className="text-surface-600 text-xs font-mono">{m.slug}</code>
               </div>
             ))}
           </div>
@@ -151,15 +169,25 @@ export default function AdminPage() {
       {/* Other */}
       {other.length > 0 && (
         <section>
-          <h2 className="text-xl font-semibold text-gray-400 mb-4">
-            Other ({other.length})
-          </h2>
+          <p className="section-label mb-4">
+            // Other ({other.length})
+          </p>
           <div className="space-y-3">
             {other.map((m) => (
-              <div key={m.id} className="glass-card p-4 flex items-center justify-between opacity-60">
+              <div key={m.id} className="border border-surface-400 bg-surface-100 p-4 flex items-center justify-between opacity-60">
                 <div>
-                  <h3 className="text-white font-medium">{m.display_name}</h3>
-                  <p className="text-gray-400 text-sm">{m.hf_repo} &middot; {m.status}</p>
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-neutral-100 font-mono font-bold">{m.display_name}</h3>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`inline-block w-1.5 h-1.5 ${statusDot[m.status] || "bg-surface-600"}`}></span>
+                      <span className={`text-xs font-mono uppercase tracking-[0.2em] ${statusText[m.status] || "text-surface-600"}`}>
+                        {m.status}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="text-surface-800 text-sm font-mono mt-1">
+                    {m.hf_repo} &middot; {m.status}
+                  </p>
                 </div>
               </div>
             ))}

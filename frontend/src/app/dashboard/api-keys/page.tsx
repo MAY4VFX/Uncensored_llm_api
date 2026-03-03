@@ -13,8 +13,11 @@ export default function ApiKeysPage() {
   }, [router]);
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-12">
-      <h1 className="text-3xl font-bold text-white mb-8">API Key Management</h1>
+    <div className="max-w-3xl mx-auto px-6 py-16">
+      <p className="section-label mb-4">// Credentials</p>
+      <h1 className="text-3xl font-mono font-bold text-neutral-100 mb-8">
+        API Key Management<span className="text-terminal-500 animate-blink">_</span>
+      </h1>
       <ApiKeyManager />
     </div>
   );

@@ -62,63 +62,63 @@ export default function ApiKeyManager() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-white mb-4">API Keys</h2>
+      <p className="section-label mb-6">// API keys</p>
 
-      {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+      {error && <p className="text-red-500 font-mono text-xs mb-4">{error}</p>}
 
       {newRawKey && (
-        <div className="bg-green-900/30 border border-green-700 rounded-lg p-4 mb-4">
-          <p className="text-green-400 text-sm mb-2">
-            Your new API key (copy it now, it won&apos;t be shown again):
+        <div className="border border-terminal-700 bg-terminal-950/30 p-4 mb-6">
+          <p className="text-terminal-400 text-xs font-mono mb-2 uppercase tracking-widest">
+            New key generated — copy now
           </p>
-          <code className="text-green-300 text-sm break-all bg-gray-900 p-2 rounded block">
+          <code className="text-terminal-300 text-xs font-mono break-all bg-surface-0 p-3 block border border-surface-400">
             {newRawKey}
           </code>
           <button
             onClick={() => setNewRawKey(null)}
-            className="mt-2 text-sm text-gray-400 hover:text-white"
+            className="mt-3 text-xs font-mono text-surface-800 hover:text-neutral-300 uppercase tracking-widest transition-colors"
           >
             Dismiss
           </button>
         </div>
       )}
 
-      <div className="flex gap-3 mb-6">
+      <div className="flex gap-px mb-8">
         <input
           type="text"
           placeholder="Key name (optional)"
           value={newKeyName}
           onChange={(e) => setNewKeyName(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm flex-1"
+          className="input-field flex-1"
         />
         <button
           onClick={handleCreate}
           disabled={loading}
-          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+          className="btn-primary disabled:opacity-50"
         >
-          Create Key
+          Generate
         </button>
       </div>
 
-      <div className="space-y-3">
+      <div className="border border-surface-400 divide-y divide-surface-300">
         {keys.map((k) => (
           <div
             key={k.id}
-            className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-lg p-4"
+            className="flex items-center justify-between p-4 hover:bg-surface-100 transition-colors"
           >
             <div>
-              <p className="text-white text-sm font-medium">{k.name}</p>
-              <p className="text-gray-400 text-xs mt-1">
+              <p className="text-neutral-200 text-sm font-mono">{k.name}</p>
+              <p className="text-surface-800 text-xs font-mono mt-1">
                 {k.key_prefix}...{" "}
-                <span className={k.is_active ? "text-green-400" : "text-red-400"}>
-                  {k.is_active ? "Active" : "Revoked"}
+                <span className={k.is_active ? "text-terminal-500" : "text-red-500"}>
+                  [{k.is_active ? "ACTIVE" : "REVOKED"}]
                 </span>
               </p>
             </div>
             {k.is_active && (
               <button
                 onClick={() => handleRevoke(k.id)}
-                className="text-red-400 hover:text-red-300 text-sm"
+                className="text-xs font-mono text-surface-800 hover:text-red-500 uppercase tracking-widest transition-colors"
               >
                 Revoke
               </button>
@@ -126,7 +126,9 @@ export default function ApiKeyManager() {
           </div>
         ))}
         {keys.length === 0 && (
-          <p className="text-gray-500 text-sm">No API keys yet. Create one above.</p>
+          <p className="text-surface-700 text-xs font-mono p-6 text-center">
+            No API keys generated yet.
+          </p>
         )}
       </div>
     </div>

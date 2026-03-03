@@ -25,7 +25,6 @@ export default function ModelsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Try authenticated endpoint first (shows all models), fallback to public
     const token = getToken();
     if (token) {
       listAllModels(token)
@@ -33,7 +32,6 @@ export default function ModelsPage() {
         .catch(() => setModels([]))
         .finally(() => setLoading(false));
     } else {
-      // Public endpoint only shows active models via /v1/models
       fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/v1/models`)
         .then((r) => r.json())
         .then((data) => {
@@ -65,27 +63,33 @@ export default function ModelsPage() {
   );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-12">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Model Catalog</h1>
-        <p className="text-gray-400">
+    <div className="max-w-7xl mx-auto px-6 py-16">
+      <div className="mb-10">
+        <p className="section-label mb-4">// Available Models</p>
+        <h1 className="text-3xl font-mono font-bold text-neutral-100 mb-2">
+          Model Catalog<span className="text-terminal-500 animate-blink">_</span>
+        </h1>
+        <p className="text-sm font-mono text-surface-800">
           Browse available uncensored and abliterated LLM models
         </p>
       </div>
 
-      <input
-        type="text"
-        placeholder="Search models..."
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        className="input-field w-full max-w-md mb-8"
-      />
+      <div className="mb-8">
+        <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Search</label>
+        <input
+          type="text"
+          placeholder="Filter models..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="input-field w-full max-w-md"
+        />
+      </div>
 
       {loading ? (
-        <div className="text-gray-400">Loading models...</div>
+        <p className="text-surface-800 font-mono text-sm">Loading models...</p>
       ) : filtered.length === 0 ? (
-        <div className="glass-card p-12 text-center">
-          <p className="text-gray-400">No models found. Check back soon!</p>
+        <div className="border border-surface-400 bg-surface-100 p-12 text-center">
+          <p className="text-surface-800 font-mono text-sm">No models found. Check back soon.</p>
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">

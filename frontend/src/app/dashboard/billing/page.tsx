@@ -31,56 +31,72 @@ export default function BillingPage() {
     getMe(token).then(setUser).catch(() => router.push("/login"));
   }, [router]);
 
-  if (!user) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (!user) return <div className="text-surface-800 font-mono text-sm p-8">Loading...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-12">
-      <h1 className="text-3xl font-bold text-white mb-2">Billing</h1>
-      <p className="text-gray-400 mb-8">
-        Current balance: <span className="text-white font-semibold">${user.credits.toFixed(4)}</span>
-        {" "}&middot; Tier: <span className="text-brand-400 capitalize">{user.tier}</span>
-      </p>
+    <div className="max-w-5xl mx-auto px-6 py-16">
+      <p className="section-label mb-4">// Billing &amp; Credits</p>
+      <h1 className="text-3xl font-mono font-bold text-neutral-100 mb-3">
+        Billing<span className="text-terminal-500 animate-blink">_</span>
+      </h1>
+      <div className="flex items-center gap-4 text-sm font-mono text-surface-800 mb-10">
+        <span>
+          Balance: <span className="text-terminal-500">${user.credits.toFixed(4)}</span>
+        </span>
+        <span className="text-surface-400">|</span>
+        <span>
+          Tier: <span className="uppercase text-terminal-400">{user.tier}</span>
+        </span>
+      </div>
 
       {/* Credit Packages */}
-      <h2 className="text-xl font-semibold text-white mb-4">Top Up Credits</h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+      <p className="section-label mb-4">// Top Up Credits</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-14">
         {CREDIT_PACKAGES.map((pkg) => (
           <button
             key={pkg.name}
-            className="glass-card glow-border p-6 text-center hover:bg-gray-800/60 transition-colors"
+            className="border border-surface-400 bg-surface-100 p-6 text-center hover:border-terminal-500 hover:bg-surface-200 transition-colors"
           >
-            <p className="text-2xl font-bold text-white mb-1">{pkg.price}</p>
-            <p className="text-gray-400 text-sm">{pkg.credits} credits</p>
+            <p className="text-2xl font-mono font-bold text-terminal-500 mb-1">{pkg.price}</p>
+            <p className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900">{pkg.credits} credits</p>
           </button>
         ))}
       </div>
 
       {/* Subscriptions */}
-      <h2 className="text-xl font-semibold text-white mb-4">Subscription Plans</h2>
+      <p className="section-label mb-4">// Subscription Plans</p>
       <div className="grid md:grid-cols-3 gap-6">
         {SUBSCRIPTIONS.map((sub) => (
           <div
             key={sub.name}
-            className={`glass-card p-6 relative ${
-              sub.popular ? "border-brand-500/40" : ""
-            } ${user.tier === sub.tier ? "ring-2 ring-brand-500" : ""}`}
+            className={`border bg-surface-100 p-6 relative ${
+              user.tier === sub.tier
+                ? "border-terminal-500"
+                : sub.popular
+                ? "border-terminal-600"
+                : "border-surface-400"
+            }`}
           >
             {sub.popular && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-brand-600 text-white text-xs rounded-full">
+              <div className="absolute -top-3 left-4 px-3 py-0.5 bg-terminal-600 text-neutral-100 text-xs font-mono uppercase tracking-[0.2em]">
                 Popular
               </div>
             )}
-            <h3 className="text-lg font-semibold text-white mb-1">{sub.name}</h3>
-            <p className="text-2xl font-bold text-white mb-4">{sub.price}</p>
-            <ul className="text-gray-400 text-sm space-y-2 mb-6">
-              <li>{sub.tokens}</li>
-              <li>{sub.models}</li>
+            <h3 className="text-lg font-mono font-bold text-neutral-100 mb-1">{sub.name}</h3>
+            <p className="text-2xl font-mono font-bold text-terminal-500 mb-4">{sub.price}</p>
+            <ul className="text-surface-800 text-sm font-mono space-y-2 mb-6">
+              <li className="flex items-center gap-2">
+                <span className="text-terminal-500">&gt;</span> {sub.tokens}
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="text-terminal-500">&gt;</span> {sub.models}
+              </li>
             </ul>
             <button
-              className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`w-full py-2 text-sm font-mono uppercase tracking-[0.2em] transition-colors ${
                 user.tier === sub.tier
-                  ? "bg-brand-500/20 text-brand-400 cursor-default"
-                  : "bg-brand-600 hover:bg-brand-500 text-white"
+                  ? "border border-terminal-500 text-terminal-400 bg-transparent cursor-default"
+                  : "btn-primary"
               }`}
               disabled={user.tier === sub.tier}
             >

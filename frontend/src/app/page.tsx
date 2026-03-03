@@ -5,118 +5,150 @@ export default function Home() {
   return (
     <div>
       {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-radial from-brand-950/40 via-gray-950 to-gray-950" />
-        <div className="relative max-w-7xl mx-auto px-4 py-24 sm:py-32 text-center">
-          <div className="inline-block mb-4 px-4 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20">
-            <span className="text-brand-400 text-sm font-medium">OpenAI-Compatible API</span>
-          </div>
-          <h1 className="text-5xl sm:text-7xl font-bold mb-6">
-            <span className="gradient-text">Unchained</span>{" "}
-            <span className="text-white">LLM Access</span>
+      <section className="relative border-b border-surface-300">
+        <div className="max-w-7xl mx-auto px-6 py-28 sm:py-36">
+          <p className="section-label mb-6">// OpenAI-compatible endpoint</p>
+          <h1 className="text-5xl sm:text-7xl font-mono font-bold mb-6 leading-tight">
+            <span className="text-glow">Unchained</span>
+            <br />
+            <span className="text-neutral-200">LLM Access</span>
+            <span className="text-terminal-500 animate-blink">_</span>
           </h1>
-          <p className="text-gray-400 text-lg sm:text-xl max-w-2xl mx-auto mb-10">
-            Access uncensored and abliterated LLM models through a simple API.
-            New models auto-discovered from HuggingFace. Pay only for what you use.
+          <p className="text-surface-900 text-lg max-w-xl mb-12 leading-relaxed">
+            Uncensored and abliterated models. Auto-discovered from HuggingFace.
+            Serverless GPU. Pay per token. No restrictions.
           </p>
-          <div className="flex gap-4 justify-center">
+          <div className="flex gap-4">
             <Link href="/register" className="btn-primary">
-              Get Started Free
+              Get Access
             </Link>
-            <Link href="/docs" className="btn-secondary">
-              View API Docs
+            <Link href="/playground" className="btn-secondary">
+              Try Playground
             </Link>
           </div>
         </div>
       </section>
 
+      {/* Stats bar */}
+      <section className="border-b border-surface-300">
+        <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4">
+          {[
+            ["Models", "50+"],
+            ["Latency", "<2s cold start"],
+            ["Uptime", "99.9%"],
+            ["Cost", "$0/idle"],
+          ].map(([label, value], i) => (
+            <div
+              key={label}
+              className={`py-6 px-4 ${i < 3 ? "border-r border-surface-300" : ""}`}
+            >
+              <p className="text-xs font-mono uppercase tracking-widest text-surface-800 mb-1">{label}</p>
+              <p className="text-lg font-mono text-terminal-400">{value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Features */}
-      <section className="max-w-7xl mx-auto px-4 py-20">
-        <div className="grid md:grid-cols-3 gap-6">
-          <div className="glass-card p-8">
-            <div className="w-12 h-12 rounded-xl bg-brand-500/10 flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+      <section className="max-w-7xl mx-auto px-6 py-24">
+        <p className="section-label mb-8">// Core features</p>
+        <div className="grid md:grid-cols-3 gap-px bg-surface-300">
+          {[
+            {
+              title: "OpenAI Compatible",
+              desc: "Drop-in replacement. Use existing SDKs and tools. Change the base URL, keep your code.",
+              tag: "PROTOCOL",
+            },
+            {
+              title: "Auto-Discovery",
+              desc: "Scout agent monitors HuggingFace around the clock. New uncensored models deployed automatically.",
+              tag: "AUTOMATION",
+            },
+            {
+              title: "Pay Per Token",
+              desc: "Serverless GPU. No idle costs. Starting at $0.39 per 1M output tokens for 7B models.",
+              tag: "BILLING",
+            },
+          ].map((f) => (
+            <div key={f.title} className="bg-surface-50 p-8 hover:bg-surface-100 transition-colors">
+              <p className="text-xs font-mono text-terminal-600 uppercase tracking-widest mb-4">{f.tag}</p>
+              <h3 className="text-lg font-mono font-semibold text-neutral-100 mb-3">{f.title}</h3>
+              <p className="text-surface-900 text-sm leading-relaxed">{f.desc}</p>
             </div>
-            <h3 className="text-lg font-semibold text-white mb-2">OpenAI Compatible</h3>
-            <p className="text-gray-400 text-sm">
-              Drop-in replacement for OpenAI API. Use your existing SDKs and code — just change the base URL and API key.
-            </p>
-          </div>
+          ))}
+        </div>
+      </section>
 
-          <div className="glass-card p-8">
-            <div className="w-12 h-12 rounded-xl bg-accent-500/10 flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-2">Auto-Discovery</h3>
-            <p className="text-gray-400 text-sm">
-              Our scout agent monitors HuggingFace 24/7 for new uncensored models and automatically deploys the best ones.
-            </p>
-          </div>
-
-          <div className="glass-card p-8">
-            <div className="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-2">Pay Per Token</h3>
-            <p className="text-gray-400 text-sm">
-              Serverless GPU infrastructure. No idle costs. Pay only for the tokens you generate, starting from $0.39/1M tokens.
+      {/* How it works */}
+      <section className="border-y border-surface-300">
+        <div className="max-w-7xl mx-auto px-6 py-24">
+          <p className="section-label mb-8">// Request flow</p>
+          <div className="font-mono text-sm text-surface-800 space-y-2 max-w-2xl">
+            <p><span className="text-terminal-400">$</span> curl api.unchained.ai/v1/chat/completions \</p>
+            <p className="pl-6">-H &quot;Authorization: Bearer <span className="text-terminal-500">sk-unch-...</span>&quot; \</p>
+            <p className="pl-6">-d &apos;&#123;&quot;model&quot;: &quot;<span className="text-neutral-300">glm-4-heretic</span>&quot;, ...&#125;&apos;</p>
+            <p className="mt-4 text-surface-700">
+              <span className="text-surface-600">[1]</span> Validate API key{" "}
+              <span className="text-surface-600">[2]</span> Check credits{" "}
+              <span className="text-surface-600">[3]</span> Rate limit{" "}
+              <span className="text-surface-600">[4]</span> Proxy to RunPod vLLM{" "}
+              <span className="text-surface-600">[5]</span> Stream response{" "}
+              <span className="text-surface-600">[6]</span> Log usage
             </p>
           </div>
         </div>
       </section>
 
       {/* Code Example */}
-      <section className="max-w-4xl mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-white text-center mb-2">Start in Minutes</h2>
-        <p className="text-gray-400 text-center mb-8">
-          Works with any OpenAI SDK. Just change two lines.
-        </p>
+      <section className="max-w-4xl mx-auto px-6 py-24">
+        <p className="section-label mb-2">// Integration</p>
+        <h2 className="text-2xl font-mono font-bold text-neutral-100 mb-8">
+          Two lines to switch<span className="text-terminal-500">.</span>
+        </h2>
         <CodeExample />
       </section>
 
-      {/* Pricing teaser */}
-      <section className="max-w-7xl mx-auto px-4 py-20">
-        <h2 className="text-3xl font-bold text-white text-center mb-12">Simple Pricing</h2>
-        <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-          <div className="glass-card p-8 text-center">
-            <h3 className="text-lg font-semibold text-white mb-1">Pay As You Go</h3>
-            <p className="text-gray-400 text-sm mb-4">Perfect for getting started</p>
-            <p className="text-3xl font-bold text-white mb-4">$5<span className="text-lg text-gray-400 font-normal">+</span></p>
-            <p className="text-gray-400 text-sm">Prepaid credits, use any model</p>
-          </div>
-
-          <div className="glass-card p-8 text-center border-brand-500/30 relative">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-brand-600 text-white text-xs rounded-full">
-              Popular
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-1">Pro</h3>
-            <p className="text-gray-400 text-sm mb-4">For serious developers</p>
-            <p className="text-3xl font-bold text-white mb-4">$49<span className="text-lg text-gray-400 font-normal">/mo</span></p>
-            <p className="text-gray-400 text-sm">25M tokens, all models, priority</p>
-          </div>
-
-          <div className="glass-card p-8 text-center">
-            <h3 className="text-lg font-semibold text-white mb-1">Business</h3>
-            <p className="text-gray-400 text-sm mb-4">High-volume workloads</p>
-            <p className="text-3xl font-bold text-white mb-4">$149<span className="text-lg text-gray-400 font-normal">/mo</span></p>
-            <p className="text-gray-400 text-sm">100M tokens, priority queues</p>
+      {/* Pricing */}
+      <section className="border-y border-surface-300">
+        <div className="max-w-7xl mx-auto px-6 py-24">
+          <p className="section-label mb-8">// Pricing</p>
+          <div className="grid md:grid-cols-3 gap-px bg-surface-300">
+            {[
+              { name: "Pay As You Go", price: "$5+", desc: "Prepaid credits. Any model.", tag: null },
+              { name: "Pro", price: "$49/mo", desc: "25M tokens. All models. Priority.", tag: "POPULAR" },
+              { name: "Business", price: "$149/mo", desc: "100M tokens. Priority queues.", tag: null },
+            ].map((plan) => (
+              <div key={plan.name} className="bg-surface-50 p-8 relative">
+                {plan.tag && (
+                  <span className="absolute top-4 right-4 text-[10px] font-mono text-terminal-500 uppercase tracking-widest">
+                    {plan.tag}
+                  </span>
+                )}
+                <p className="text-xs font-mono text-surface-800 uppercase tracking-widest mb-4">{plan.name}</p>
+                <p className="text-3xl font-mono font-bold text-neutral-100 mb-4">{plan.price}</p>
+                <p className="text-surface-900 text-sm">{plan.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-800 mt-20">
-        <div className="max-w-7xl mx-auto px-4 py-8 flex justify-between items-center">
-          <span className="text-gray-500 text-sm">UnchainedAPI</span>
-          <div className="flex gap-6">
-            <Link href="/docs" className="text-gray-500 hover:text-gray-300 text-sm">Docs</Link>
-            <Link href="/models" className="text-gray-500 hover:text-gray-300 text-sm">Models</Link>
+      <footer className="border-t border-surface-300">
+        <div className="max-w-7xl mx-auto px-6 py-8 flex justify-between items-center">
+          <span className="text-xs font-mono text-surface-700 uppercase tracking-widest">
+            Unchained_API
+          </span>
+          <div className="flex gap-8">
+            <Link href="/docs" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
+              Docs
+            </Link>
+            <Link href="/models" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
+              Models
+            </Link>
+            <Link href="/playground" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
+              Playground
+            </Link>
           </div>
         </div>
       </footer>

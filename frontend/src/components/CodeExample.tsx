@@ -56,24 +56,24 @@ export default function CodeExample() {
   const [lang, setLang] = useState<Lang>("python");
 
   return (
-    <div>
-      <div className="flex gap-1 mb-0">
+    <div className="border border-surface-400">
+      <div className="flex border-b border-surface-400">
         {(Object.keys(examples) as Lang[]).map((l) => (
           <button
             key={l}
             onClick={() => setLang(l)}
-            className={`px-4 py-2 text-sm rounded-t-lg transition-colors ${
+            className={`px-5 py-2.5 text-xs font-mono uppercase tracking-widest transition-colors border-r border-surface-400 last:border-r-0 ${
               lang === l
-                ? "bg-gray-800 text-cyan-400 border-t border-x border-gray-700"
-                : "bg-gray-900 text-gray-500 hover:text-gray-300"
+                ? "bg-surface-200 text-terminal-400"
+                : "bg-surface-100 text-surface-800 hover:text-neutral-300"
             }`}
           >
-            {l === "curl" ? "cURL" : l === "python" ? "Python" : "JavaScript"}
+            {l === "curl" ? "curl" : l}
           </button>
         ))}
       </div>
-      <pre className="bg-gray-800 border border-gray-700 rounded-b-lg rounded-tr-lg p-4 overflow-x-auto">
-        <code className="text-sm text-gray-300 whitespace-pre">{examples[lang]}</code>
+      <pre className="bg-surface-50 p-6 overflow-x-auto">
+        <code className="text-xs font-mono text-surface-900 whitespace-pre leading-relaxed">{examples[lang]}</code>
       </pre>
     </div>
   );

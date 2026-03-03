@@ -4,45 +4,119 @@
 
 @layer base {
   body {
-    @apply bg-gray-950 text-gray-100 antialiased;
+    @apply bg-surface-0 text-neutral-300 antialiased;
+  }
+
+  ::selection {
+    @apply bg-terminal-500/30 text-terminal-200;
   }
 }
 
 @layer components {
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-400 via-accent-400 to-brand-300;
+  /* Terminal green glow text */
+  .text-glow {
+    @apply text-terminal-400;
+    text-shadow: 0 0 10px rgba(74, 222, 128, 0.3), 0 0 40px rgba(74, 222, 128, 0.1);
   }
 
-  .glass-card {
-    @apply bg-gray-900/60 backdrop-blur-sm border border-gray-800/50 rounded-2xl;
+  /* Industrial card — dark, sharp, minimal */
+  .ind-card {
+    @apply bg-surface-100 border border-surface-400 p-6;
   }
 
-  .glow-border {
-    @apply border border-brand-500/30 hover:border-brand-400/50 transition-colors;
+  .ind-card:hover {
+    @apply border-terminal-500/40;
   }
 
+  /* Button — industrial primary */
   .btn-primary {
-    @apply bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400
-           text-white px-6 py-3 rounded-xl font-medium transition-all
-           shadow-lg shadow-brand-500/20 hover:shadow-brand-500/40;
+    @apply bg-terminal-500 hover:bg-terminal-400 text-black
+           px-6 py-3 font-mono text-sm uppercase tracking-widest
+           transition-all duration-200;
   }
 
+  /* Button — outlined */
   .btn-secondary {
-    @apply bg-gray-800 hover:bg-gray-700 text-gray-200 px-6 py-3 rounded-xl
-           font-medium transition-colors border border-gray-700;
+    @apply bg-transparent border border-surface-600 text-neutral-300
+           hover:border-terminal-500/50 hover:text-terminal-400
+           px-6 py-3 font-mono text-sm uppercase tracking-widest
+           transition-all duration-200;
   }
 
+  /* Input — terminal style */
   .input-field {
-    @apply bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm
-           placeholder:text-gray-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500
+    @apply bg-surface-50 border border-surface-400 px-4 py-3
+           text-neutral-200 text-sm font-mono
+           placeholder:text-surface-800
+           focus:outline-none focus:border-terminal-500/60
            transition-colors;
+  }
+
+  /* Section label — uppercase tracked */
+  .section-label {
+    @apply text-xs font-mono uppercase tracking-[0.2em] text-surface-900;
+  }
+
+  /* Status indicator */
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block mr-2;
   }
 }
 
-/* Subtle grid background */
+/* Noise/grain overlay via SVG filter */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* Scanline effect (subtle) */
+.scanlines::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+}
+
+/* Grid background — monochrome green tint */
 .bg-grid {
   background-image:
-    linear-gradient(to right, rgba(99, 102, 241, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
+    linear-gradient(to right, rgba(74, 222, 128, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(74, 222, 128, 0.02) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Horizontal rule — industrial */
+.ind-hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(74, 222, 128, 0.15), transparent);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #222;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #333;
 }

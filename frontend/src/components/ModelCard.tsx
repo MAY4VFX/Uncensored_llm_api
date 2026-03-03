@@ -10,11 +10,11 @@ interface ModelCardProps {
   description: string | null;
 }
 
-const statusColors: Record<string, string> = {
-  active: "bg-green-500/20 text-green-400",
-  pending: "bg-yellow-500/20 text-yellow-400",
-  deploying: "bg-blue-500/20 text-blue-400",
-  inactive: "bg-gray-500/20 text-gray-400",
+const statusConfig: Record<string, { color: string; dot: string }> = {
+  active: { color: "text-terminal-400", dot: "bg-terminal-400" },
+  pending: { color: "text-yellow-500", dot: "bg-yellow-500" },
+  deploying: { color: "text-blue-400", dot: "bg-blue-400" },
+  inactive: { color: "text-surface-700", dot: "bg-surface-700" },
 };
 
 export default function ModelCard({
@@ -28,44 +28,45 @@ export default function ModelCard({
   costOutput,
   description,
 }: ModelCardProps) {
+  const st = statusConfig[status] || statusConfig.inactive;
+
   return (
-    <div className="glass-card glow-border p-6">
-      <div className="flex items-start justify-between mb-3">
-        <h3 className="text-lg font-semibold text-white">{displayName}</h3>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status] || statusColors.inactive}`}>
+    <div className="ind-card group">
+      <div className="flex items-start justify-between mb-4">
+        <h3 className="text-sm font-mono font-semibold text-neutral-100 group-hover:text-terminal-400 transition-colors">
+          {displayName}
+        </h3>
+        <span className={`flex items-center text-[10px] font-mono uppercase tracking-widest ${st.color}`}>
+          <span className={`status-dot ${st.dot}`} />
           {status}
         </span>
       </div>
 
-      <p className="text-gray-400 text-sm mb-4 line-clamp-2">
-        {description || `${paramsB}B parameter model`}
+      <p className="text-surface-800 text-xs mb-4 line-clamp-2 leading-relaxed">
+        {description || `${paramsB}B parameter uncensored model`}
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
-        <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
-          {paramsB}B
-        </span>
-        <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
-          {quantization}
-        </span>
-        <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">
-          {gpuType}
-        </span>
+        {[`${paramsB}B`, quantization, gpuType].map((tag) => (
+          <span key={tag} className="text-[10px] font-mono text-surface-800 border border-surface-400 px-2 py-0.5 uppercase">
+            {tag}
+          </span>
+        ))}
       </div>
 
-      <div className="border-t border-gray-700 pt-3">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-400">Input</span>
-          <span className="text-white">${costInput.toFixed(2)} / 1M tokens</span>
+      <div className="border-t border-surface-300 pt-3 space-y-1">
+        <div className="flex justify-between text-xs font-mono">
+          <span className="text-surface-800">input</span>
+          <span className="text-neutral-300">${costInput.toFixed(2)}/1M</span>
         </div>
-        <div className="flex justify-between text-sm mt-1">
-          <span className="text-gray-400">Output</span>
-          <span className="text-white">${costOutput.toFixed(2)} / 1M tokens</span>
+        <div className="flex justify-between text-xs font-mono">
+          <span className="text-surface-800">output</span>
+          <span className="text-neutral-300">${costOutput.toFixed(2)}/1M</span>
         </div>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-gray-700">
-        <code className="text-xs text-gray-500 break-all">{slug}</code>
+      <div className="mt-3 pt-3 border-t border-surface-300">
+        <code className="text-[10px] font-mono text-surface-700 break-all">{slug}</code>
       </div>
     </div>
   );

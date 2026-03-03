@@ -20,17 +20,25 @@ export default function DashboardPage() {
     getMe(token).then(setUser).catch(() => router.push("/login"));
   }, [router]);
 
-  if (!user) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (!user) return <div className="text-surface-800 font-mono text-sm p-8">Loading...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-12">
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-7xl mx-auto px-6 py-16">
+      <div className="flex items-start justify-between mb-10">
         <div>
-          <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-          <p className="text-gray-400 mt-1">
-            {user.email} &middot;{" "}
-            <span className="capitalize text-brand-400">{user.tier}</span> tier
-          </p>
+          <p className="section-label mb-4">// Control Panel</p>
+          <h1 className="text-3xl font-mono font-bold text-neutral-100 mb-3">
+            Dashboard<span className="text-terminal-500 animate-blink">_</span>
+          </h1>
+          <div className="flex items-center gap-4 text-sm font-mono text-surface-800">
+            <span>{user.email}</span>
+            <span className="text-surface-400">|</span>
+            <span className="uppercase text-terminal-400">{user.tier}</span>
+            <span className="text-surface-400">|</span>
+            <span>
+              <span className="text-terminal-500">${user.credits.toFixed(4)}</span> credits
+            </span>
+          </div>
         </div>
         <div className="flex gap-3">
           <Link href="/dashboard/api-keys" className="btn-secondary text-sm">
@@ -42,7 +50,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <UsageChart />
+      <div className="border border-surface-400 bg-surface-100 p-6">
+        <p className="section-label mb-4">// Usage Metrics</p>
+        <UsageChart />
+      </div>
     </div>
   );
 }
