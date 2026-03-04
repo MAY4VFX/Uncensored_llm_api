@@ -155,9 +155,12 @@ export default function PlaygroundPage() {
                 const delta = parsed.choices?.[0]?.delta?.content;
                 if (delta) {
                   setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId ? { ...m, content: m.content + delta } : m
-                    )
+                    prev.map((m) => {
+                      if (m.id !== assistantId) return m;
+                      // Clear status message on first real content
+                      const isStatus = m.content.startsWith("Waiting ") || m.content.startsWith("Worker ") || m.content.startsWith("Status:") || m.content.startsWith("Processing");
+                      return { ...m, content: (isStatus ? "" : m.content) + delta };
+                    })
                   );
                 }
               } catch {
