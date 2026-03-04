@@ -27,8 +27,13 @@ def _status_message(status: str) -> str:
     return messages.get(status, "Preparing worker...")
 
 
-def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream: bool = False) -> dict:
-    """Transform OpenAI-format request into vLLM-compatible RunPod payload."""
+def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel) -> dict:
+    """Transform OpenAI-format request into vLLM-compatible RunPod payload.
+
+    NOTE: Do NOT pass stream=True to vLLM here. Streaming to the client is
+    handled by RunPod's /run + /stream/{job_id} polling, not by vLLM SSE.
+    Passing stream=True causes vLLM to return raw SSE lines which break parsing.
+    """
     return {
         "openai_route": "/v1/chat/completions",
         "openai_input": {
@@ -37,7 +42,7 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
             "temperature": request.temperature,
             "max_tokens": request.max_tokens or 2048,
             "top_p": request.top_p,
-            "stream": stream,
+            "stream": False,
             "stop": request.stop,
         },
     }
@@ -101,7 +106,7 @@ async def proxy_chat_completion_stream(
     request: ChatCompletionRequest, model: LlmModel
 ) -> AsyncGenerator[str, None]:
     """Proxy a streaming chat completion request to RunPod via SSE."""
-    payload = _build_vllm_payload(request, model, stream=True)
+    payload = _build_vllm_payload(request, model)
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
