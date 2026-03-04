@@ -111,7 +111,7 @@ async def chat_completions(
     )
     estimated_cost = calculate_cost(
         tokens_in_estimate,
-        request.max_tokens or 2048,
+        request.max_tokens or max_ctx,
         float(model.cost_per_1m_input),
         float(model.cost_per_1m_output),
     )

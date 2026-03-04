@@ -43,8 +43,9 @@ async def playground_chat(
     tokens_in_estimate = count_message_tokens(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
+    max_ctx = model.max_context_length or 4096
     estimated_cost = calculate_cost(
-        tokens_in_estimate, request.max_tokens or 2048,
+        tokens_in_estimate, request.max_tokens or max_ctx,
         float(model.cost_per_1m_input), float(model.cost_per_1m_output),
     )
     if not await check_credits(db, user.id, estimated_cost):

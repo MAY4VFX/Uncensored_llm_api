@@ -321,7 +321,6 @@ export default function PlaygroundPage() {
             ...allMessages.map((m) => ({ role: m.role, content: m.content })),
           ],
           stream: true,
-          max_tokens: 4096,
         }),
       });
 
