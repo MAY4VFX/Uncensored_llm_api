@@ -4,13 +4,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import verify_api_key
+from app.dependencies import get_current_user, verify_api_key
 from app.middleware.rate_limiter import check_rate_limit
 from app.models.api_key import ApiKey
 from app.models.llm_model import LlmModel
 from app.models.user import User
 from app.schemas.openai import ChatCompletionRequest, ChatCompletionResponse
 from app.services import proxy_service, runpod_service
+from app.config import settings
 from app.services.credits_service import check_credits, deduct_credits
 from app.services.usage_service import calculate_cost, count_message_tokens, log_usage
 
@@ -39,6 +40,36 @@ async def model_status(
         "estimated_wait_seconds": worker["estimated_wait"],
         "workers_ready": worker["workers_ready"],
     }
+
+
+@router.post("/v1/models/{model_slug}/warm")
+async def warm_model(
+    model_slug: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger worker wake-up without waiting for full inference."""
+    result = await db.execute(
+        select(LlmModel).where(LlmModel.slug == model_slug, LlmModel.status == "active")
+    )
+    model = result.scalar_one_or_none()
+    if not model or not model.runpod_endpoint_id:
+        raise HTTPException(status_code=404, detail="Model not found or endpoint not configured")
+
+    import httpx
+    url = f"{settings.runpod_base_url}/{model.runpod_endpoint_id}/run"
+    headers = {
+        "Authorization": f"Bearer {settings.runpod_api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(url, headers=headers, json={
+                "input": {"openai_route": "/v1/models", "openai_input": {}}
+            })
+    except Exception:
+        pass  # Fire-and-forget: don't fail if RunPod is slow
+    return {"status": "warming"}
 
 
 @router.post("/v1/chat/completions")
