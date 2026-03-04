@@ -189,6 +189,24 @@ async def run_inference(endpoint_id: str, payload: dict) -> dict:
         raise RuntimeError("RunPod inference timed out")
 
 
+def _extract_text(output) -> str:
+    """Extract text content from RunPod output (can be str, dict, or list)."""
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list) and len(output) > 0:
+        output = output[0]
+    if isinstance(output, dict):
+        # vLLM OpenAI-compat response
+        choices = output.get("choices", [])
+        if choices:
+            msg = choices[0].get("message", {})
+            delta = choices[0].get("delta", {})
+            return msg.get("content", "") or delta.get("content", "")
+        # Raw text field
+        return output.get("text", output.get("result", ""))
+    return str(output) if output else ""
+
+
 async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[str, None]:
     """Run async inference via /run and poll for results, yielding chunks."""
     url = f"{settings.runpod_base_url}/{endpoint_id}/run"
@@ -210,8 +228,9 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
                 data = stream_resp.json()
                 for chunk in data.get("stream", []):
                     output = chunk.get("output", "")
-                    if output:
-                        yield output
+                    text = _extract_text(output)
+                    if text:
+                        yield text
 
                 if data.get("status") in ("COMPLETED", "FAILED"):
                     break
@@ -221,8 +240,9 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
             status_data = status_resp.json()
             if status_data.get("status") == "COMPLETED":
                 output = status_data.get("output", "")
-                if output:
-                    yield output if isinstance(output, str) else json.dumps(output)
+                text = _extract_text(output)
+                if text:
+                    yield text
                 break
             elif status_data.get("status") == "FAILED":
                 raise RuntimeError(f"RunPod job failed: {status_data.get('error')}")
