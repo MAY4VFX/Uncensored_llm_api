@@ -31,6 +31,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://192.168.2.140:8010
     ports:
       - "3010:3000"
     environment:
