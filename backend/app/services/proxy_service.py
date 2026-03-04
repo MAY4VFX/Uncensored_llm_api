@@ -136,11 +136,26 @@ async def proxy_chat_completion_stream(
     async for text_chunk in runpod_service.stream_inference(model.runpod_endpoint_id, payload):
         if not text_chunk:
             continue
-        if not first_token_received and not worker_status["ready"]:
+
+        # Handle status markers from stream_inference (queue/progress updates)
+        if text_chunk.startswith("__STATUS:"):
+            status_data = json.loads(text_chunk[9:])
+            status_event = {
+                "object": "status",
+                "status": status_data.get("status", "unknown"),
+                "message": status_data.get("message", ""),
+                "elapsed": status_data.get("elapsed", 0),
+            }
+            yield f"data: {json.dumps(status_event)}\n\n"
+            continue
+
+        # First real token — send ready event if worker was cold
+        if not first_token_received:
             first_token_received = True
-            ready_event = {"object": "status", "status": "ready", "message": "Worker ready, generating..."}
-            yield f"data: {json.dumps(ready_event)}\n\n"
-        first_token_received = True
+            if not worker_status["ready"]:
+                ready_event = {"object": "status", "status": "ready", "message": "Worker ready, generating..."}
+                yield f"data: {json.dumps(ready_event)}\n\n"
+
         chunk = ChatCompletionChunk(
             id=completion_id,
             created=created,

@@ -126,24 +126,26 @@ export default function PlaygroundPage() {
               try {
                 const parsed = JSON.parse(data);
 
-                // Handle status events (worker warming up / ready)
+                // Handle status events (worker warming up / queue / ready)
                 if (parsed.object === "status") {
-                  const statusMsg = parsed.status as WorkerStatus;
-                  setWorkerStatus(statusMsg);
-                  if (statusMsg !== "ready") {
-                    // Show status as system message in chat
-                    setMessages((prev) =>
-                      prev.map((m) =>
-                        m.id === assistantId
-                          ? { ...m, content: parsed.message || "Worker starting..." }
-                          : m
-                      )
-                    );
-                  } else {
-                    // Worker ready — clear the status message, reset to empty for real content
+                  const statusMsg = parsed.status as string;
+                  // Map RunPod job statuses to worker status display
+                  if (statusMsg === "ready") {
+                    setWorkerStatus("ready");
                     setMessages((prev) =>
                       prev.map((m) =>
                         m.id === assistantId ? { ...m, content: "" } : m
+                      )
+                    );
+                  } else {
+                    if (statusMsg === "IN_QUEUE") setWorkerStatus("cold");
+                    else if (statusMsg === "IN_PROGRESS") setWorkerStatus("warming_up");
+                    else setWorkerStatus(statusMsg as WorkerStatus);
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === assistantId
+                          ? { ...m, content: parsed.message || "Processing..." }
+                          : m
                       )
                     );
                   }
