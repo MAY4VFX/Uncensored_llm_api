@@ -221,6 +221,7 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
         stream_url = f"{settings.runpod_base_url}/{endpoint_id}/stream/{job_id}"
         status_url = f"{settings.runpod_base_url}/{endpoint_id}/status/{job_id}"
 
+        yielded = False
         while True:
             # Try stream endpoint first
             stream_resp = await client.get(stream_url, headers=_headers())
@@ -231,6 +232,7 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
                     text = _extract_text(output)
                     if text:
                         yield text
+                        yielded = True
 
                 if data.get("status") in ("COMPLETED", "FAILED"):
                     break
@@ -239,10 +241,12 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
             status_resp = await client.get(status_url, headers=_headers())
             status_data = status_resp.json()
             if status_data.get("status") == "COMPLETED":
-                output = status_data.get("output", "")
-                text = _extract_text(output)
-                if text:
-                    yield text
+                # Only yield from status if stream didn't return anything
+                if not yielded:
+                    output = status_data.get("output", "")
+                    text = _extract_text(output)
+                    if text:
+                        yield text
                 break
             elif status_data.get("status") == "FAILED":
                 raise RuntimeError(f"RunPod job failed: {status_data.get('error')}")
