@@ -193,6 +193,13 @@ async def run_inference(endpoint_id: str, payload: dict) -> dict:
 def _extract_text(output) -> str:
     """Extract text content from RunPod output (can be str, dict, or list)."""
     if isinstance(output, str):
+        # Handle SSE-formatted strings from vLLM streaming (e.g. "data: {...}\n\n")
+        if output.startswith("data: "):
+            try:
+                parsed = json.loads(output[6:].strip())
+                return _extract_text(parsed)
+            except (json.JSONDecodeError, ValueError):
+                pass
         return output
     if isinstance(output, list) and len(output) > 0:
         output = output[0]
