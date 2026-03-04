@@ -51,34 +51,56 @@ function ThinkingIndicator() {
 
 function renderMessageContent(content: string, isStreaming: boolean) {
   const thinkOpenIdx = content.indexOf("<think>");
-  if (thinkOpenIdx === -1) {
+  const thinkCloseIdx = content.indexOf("</think>");
+
+  // No think tags at all
+  if (thinkOpenIdx === -1 && thinkCloseIdx === -1) {
     return <span>{content}</span>;
   }
 
-  const thinkCloseIdx = content.indexOf("</think>");
-  const before = content.slice(0, thinkOpenIdx);
+  // Has <think> opening tag
+  if (thinkOpenIdx !== -1) {
+    const before = content.slice(0, thinkOpenIdx);
 
-  if (thinkCloseIdx === -1) {
-    // Still thinking (streaming, no close tag yet)
-    const thinkContent = content.slice(thinkOpenIdx + 7);
+    if (thinkCloseIdx === -1) {
+      // Still thinking (streaming, no close tag yet)
+      const thinkContent = content.slice(thinkOpenIdx + 7);
+      return (
+        <>
+          {before && <span>{before}</span>}
+          {isStreaming ? <ThinkingIndicator /> : <ThinkBlock content={thinkContent} />}
+        </>
+      );
+    }
+
+    const thinkContent = content.slice(thinkOpenIdx + 7, thinkCloseIdx);
+    const after = content.slice(thinkCloseIdx + 8);
     return (
       <>
         {before && <span>{before}</span>}
-        {isStreaming ? <ThinkingIndicator /> : <ThinkBlock content={thinkContent} />}
+        <ThinkBlock content={thinkContent} />
+        <span>{after}</span>
       </>
     );
   }
 
-  const thinkContent = content.slice(thinkOpenIdx + 7, thinkCloseIdx);
-  const after = content.slice(thinkCloseIdx + 8);
+  // No <think> but has </think> — vLLM/Qwen3 omits opening tag (chat template adds it)
+  if (thinkCloseIdx !== -1) {
+    const thinkContent = content.slice(0, thinkCloseIdx);
+    const after = content.slice(thinkCloseIdx + 8);
 
-  return (
-    <>
-      {before && <span>{before}</span>}
-      <ThinkBlock content={thinkContent} />
-      <span>{after}</span>
-    </>
-  );
+    if (isStreaming && !after) {
+      return <ThinkingIndicator />;
+    }
+    return (
+      <>
+        <ThinkBlock content={thinkContent} />
+        <span>{after}</span>
+      </>
+    );
+  }
+
+  return <span>{content}</span>;
 }
 
 // --- Status bar ---
@@ -133,6 +155,7 @@ export default function PlaygroundPage() {
 
   // Polling ref
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const coldCountRef = useRef(0); // debounce: require 2 consecutive cold readings before showing "sleep"
 
   const API_URL = "/api";
 
@@ -169,7 +192,17 @@ export default function PlaygroundPage() {
       .then((data) => {
         const s = data.status as string;
         const mapped: WorkerStatus = s === "cold" ? "sleep" : (s as WorkerStatus);
-        setWorkerStatus(mapped);
+
+        if (mapped === "sleep") {
+          // Debounce: require 2 consecutive cold readings to prevent flicker
+          coldCountRef.current += 1;
+          if (coldCountRef.current >= 2) {
+            setWorkerStatus("sleep");
+          }
+        } else {
+          coldCountRef.current = 0;
+          setWorkerStatus(mapped);
+        }
       })
       .catch(() => {});
   }, [API_URL]);
