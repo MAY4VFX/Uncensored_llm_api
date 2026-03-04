@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     runpod_api_key: str = ""
     runpod_base_url: str = "https://api.runpod.ai/v2"
 
+    # HuggingFace (for gated models)
+    hf_token: str = ""
+
     # Paddle
     paddle_api_key: str = ""
     paddle_webhook_secret: str = ""
