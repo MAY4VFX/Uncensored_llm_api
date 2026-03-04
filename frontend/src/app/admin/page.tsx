@@ -174,8 +174,8 @@ export default function AdminPage() {
           </p>
           <div className="space-y-3">
             {other.map((m) => (
-              <div key={m.id} className="border border-surface-400 bg-surface-100 p-4 flex items-center justify-between opacity-60">
-                <div>
+              <div key={m.id} className="border border-surface-400 bg-surface-100 p-4 flex items-center justify-between opacity-60 hover:opacity-100 transition-opacity">
+                <div className="flex-1">
                   <div className="flex items-center gap-3">
                     <h3 className="text-neutral-100 font-mono font-bold">{m.display_name}</h3>
                     <span className="flex items-center gap-1.5">
@@ -186,9 +186,18 @@ export default function AdminPage() {
                     </span>
                   </div>
                   <p className="text-surface-800 text-sm font-mono mt-1">
-                    {m.hf_repo} &middot; {m.status}
+                    {m.hf_repo} &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
                   </p>
                 </div>
+                {m.status === "inactive" && (
+                  <button
+                    onClick={() => handleDeploy(m.id)}
+                    disabled={deploying === m.id}
+                    className="btn-primary text-sm disabled:opacity-50"
+                  >
+                    {deploying === m.id ? "Deploying..." : "Redeploy"}
+                  </button>
+                )}
               </div>
             ))}
           </div>
