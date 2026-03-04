@@ -163,23 +163,32 @@ export default function PlaygroundPage() {
     }
   }, []);
 
-  const startPolling = useCallback((model: string) => {
+  const fetchStatus = useCallback((model: string) => {
+    fetch(`${API_URL}/v1/models/${encodeURIComponent(model)}/status`)
+      .then((r) => r.json())
+      .then((data) => {
+        const s = data.status as string;
+        const mapped: WorkerStatus = s === "cold" ? "sleep" : (s as WorkerStatus);
+        setWorkerStatus(mapped);
+      })
+      .catch(() => {});
+  }, [API_URL]);
+
+  const startPolling = useCallback((model: string, intervalMs: number = 5000) => {
     stopPolling();
-    pollIntervalRef.current = setInterval(() => {
-      fetch(`${API_URL}/v1/models/${encodeURIComponent(model)}/status`)
-        .then((r) => r.json())
-        .then((data) => {
-          const s = data.status as string;
-          const mapped: WorkerStatus = s === "cold" ? "sleep" : (s as WorkerStatus);
-          setWorkerStatus(mapped);
-          if (mapped === "ready") stopPolling();
-        })
-        .catch(() => {});
-    }, 5000);
-  }, [API_URL, stopPolling]);
+    pollIntervalRef.current = setInterval(() => fetchStatus(model), intervalMs);
+  }, [fetchStatus, stopPolling]);
 
   // Cleanup polling on unmount
   useEffect(() => () => stopPolling(), [stopPolling]);
+
+  // Refresh status on window focus (worker may sleep while tab is inactive)
+  useEffect(() => {
+    if (!selectedModel) return;
+    const onFocus = () => fetchStatus(selectedModel);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [selectedModel, fetchStatus]);
 
   // --- Init ---
   useEffect(() => {
@@ -215,8 +224,8 @@ export default function PlaygroundPage() {
         const mapped: WorkerStatus = s === "cold" ? "sleep" : (s as WorkerStatus);
         setWorkerStatus(mapped);
 
-        // Pre-warm if sleeping
         if (mapped === "sleep") {
+          // Pre-warm if sleeping
           const token = getToken();
           if (token) {
             setWorkerStatus("warming_up");
@@ -224,8 +233,13 @@ export default function PlaygroundPage() {
               method: "POST",
               headers: { Authorization: `Bearer ${token}` },
             }).catch(() => {});
-            startPolling(selectedModel);
           }
+          startPolling(selectedModel, 5000);
+        } else if (mapped === "warming_up") {
+          startPolling(selectedModel, 5000);
+        } else if (mapped === "ready") {
+          // Keep polling slowly — worker may sleep after idle_timeout (30s)
+          startPolling(selectedModel, 15000);
         }
       })
       .catch(() => setWorkerStatus("unknown"));
@@ -326,7 +340,6 @@ export default function PlaygroundPage() {
                   if (!firstTokenReceived) {
                     firstTokenReceived = true;
                     setWorkerStatus("ready");
-                    stopPolling();
                   }
                   setMessages((prev) =>
                     prev.map((m) => {
@@ -344,15 +357,10 @@ export default function PlaygroundPage() {
         }
       }
 
-      // Refresh credits + final status check
+      // Refresh credits + restart slow polling (worker will sleep after idle_timeout)
       getMe(token).then(setUser);
-      fetch(`${API_URL}/v1/models/${encodeURIComponent(selectedModel)}/status`)
-        .then((r) => r.json())
-        .then((data) => {
-          const s = data.status as string;
-          setWorkerStatus(s === "cold" ? "sleep" : (s as WorkerStatus));
-        })
-        .catch(() => {});
+      setWorkerStatus("ready");
+      startPolling(selectedModel, 15000);
     } catch (err: any) {
       setError(err.message);
       setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content));
