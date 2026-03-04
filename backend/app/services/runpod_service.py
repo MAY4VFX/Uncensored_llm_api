@@ -190,9 +190,38 @@ async def run_inference(endpoint_id: str, payload: dict) -> dict:
         raise RuntimeError("RunPod inference timed out")
 
 
+def _parse_sse_content(sse_text: str) -> str | None:
+    """Parse vLLM SSE-formatted output and extract concatenated content deltas.
+
+    vLLM with stream=True returns SSE lines like:
+        data: {"choices":[{"delta":{"content":"Hello"}}]}
+    RunPod passes these as-is in the stream chunk output field.
+    Returns concatenated content, or None if not SSE format.
+    """
+    if "data: " not in sse_text:
+        return None
+    parts = []
+    for line in sse_text.split("\n"):
+        line = line.strip()
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        try:
+            parsed = json.loads(line[6:])
+            for choice in parsed.get("choices", []):
+                content = choice.get("delta", {}).get("content", "")
+                if content:
+                    parts.append(content)
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return "".join(parts)
+
+
 def _extract_text(output) -> str:
     """Extract text content from RunPod output (can be str, dict, or list)."""
     if isinstance(output, str):
+        sse_result = _parse_sse_content(output)
+        if sse_result is not None:
+            return sse_result
         return output
     if isinstance(output, list) and len(output) > 0:
         output = output[0]
