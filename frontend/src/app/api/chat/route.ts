@@ -1,6 +1,3 @@
-import { createOpenAI } from "@ai-sdk/openai";
-import { convertToModelMessages, streamText } from "ai";
-
 export const maxDuration = 120;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -8,7 +5,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export async function POST(req: Request) {
   const { messages, model: modelSlug } = await req.json();
 
-  // Extract JWT token from cookie or authorization header
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.replace("Bearer ", "");
 
@@ -19,16 +15,6 @@ export async function POST(req: Request) {
     });
   }
 
-  // Create an OpenAI-compatible client pointing to our own backend
-  const unchained = createOpenAI({
-    apiKey: token,
-    baseURL: `${API_URL}/v1`,
-    // Our backend accepts JWT tokens in the playground via the
-    // standard /v1/chat/completions when using the playground proxy,
-    // but for the playground we use a direct proxy approach
-  });
-
-  // Proxy directly to our backend's playground endpoint
   const response = await fetch(`${API_URL}/playground/chat`, {
     method: "POST",
     headers: {
@@ -53,7 +39,6 @@ export async function POST(req: Request) {
     });
   }
 
-  // Forward the SSE stream
   return new Response(response.body, {
     headers: {
       "Content-Type": "text/event-stream",
