@@ -28,6 +28,7 @@ class LlmModel(Base):
         nullable=False,
         server_default="pending",
     )
+    max_context_length = Column(Integer, nullable=False, server_default="4096")
     cost_per_1m_input = Column(Numeric(10, 4), nullable=False, server_default="0")
     cost_per_1m_output = Column(Numeric(10, 4), nullable=False, server_default="0")
     description = Column(Text, nullable=True)

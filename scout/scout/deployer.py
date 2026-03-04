@@ -24,6 +24,7 @@ async def deploy_endpoint(
     hf_repo: str,
     max_workers: int = 5,
     idle_timeout: int = 30,
+    max_model_len: int = 4096,
 ) -> str | None:
     """
     Create a RunPod Serverless Endpoint for vLLM.
@@ -53,7 +54,7 @@ async def deploy_endpoint(
             "dockerImage": "runpod/worker-vllm:stable-cuda12.1.0",
             "env": [
                 {"key": "MODEL_NAME", "value": hf_repo},
-                {"key": "MAX_MODEL_LEN", "value": "4096"},
+                {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
             ],
         }
     }

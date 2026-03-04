@@ -24,6 +24,7 @@ class LlmModel(Base):
         nullable=False,
         default="pending",
     )
+    max_context_length: Mapped[int] = mapped_column(nullable=False, default=4096)
     cost_per_1m_input: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0.0)
     cost_per_1m_output: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0.0)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

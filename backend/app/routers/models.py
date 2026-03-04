@@ -22,6 +22,7 @@ async def list_models(db: AsyncSession = Depends(get_db)):
             OpenAIModel(
                 id=m.slug,
                 created=int(m.created_at.timestamp()) if m.created_at else int(time.time()),
+                max_context_length=m.max_context_length,
             )
             for m in models
         ]

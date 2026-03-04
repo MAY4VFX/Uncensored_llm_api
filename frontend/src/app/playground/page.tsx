@@ -14,6 +14,7 @@ interface Message {
 interface ModelOption {
   id: string;
   name: string;
+  maxContext: number;
 }
 
 type WorkerStatus = "ready" | "cold" | "warming_up" | "throttled" | "unknown" | "loading" | null;
@@ -43,7 +44,7 @@ export default function PlaygroundPage() {
     fetch(`${API_URL}/v1/models`)
       .then((r) => r.json())
       .then((data) => {
-        const modelList = data.data?.map((m: any) => ({ id: m.id, name: m.id })) || [];
+        const modelList = data.data?.map((m: any) => ({ id: m.id, name: m.id, maxContext: m.max_context_length || 4096 })) || [];
         setModels(modelList);
         if (modelList.length > 0) setSelectedModel(modelList[0].id);
       })
@@ -235,6 +236,15 @@ export default function PlaygroundPage() {
           {workerStatus === "loading" && (
             <span className="text-[10px] font-mono text-surface-700">checking...</span>
           )}
+
+          {selectedModel && (() => {
+            const ctx = models.find((m) => m.id === selectedModel)?.maxContext || 4096;
+            return (
+              <span className="text-[10px] font-mono text-surface-600">
+                ctx: {ctx >= 1024 ? `${Math.floor(ctx / 1024)}k` : ctx}
+              </span>
+            );
+          })()}
         </div>
 
         <div className="flex items-center gap-6">

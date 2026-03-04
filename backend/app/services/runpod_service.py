@@ -35,11 +35,12 @@ async def create_endpoint(
     max_workers: int = 1,
     idle_timeout: int = 30,
     params_b: float = 0,
+    max_model_len: int = 4096,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
     env_vars = [
         {"key": "MODEL_NAME", "value": model_name},
-        {"key": "MAX_MODEL_LEN", "value": "4096"},
+        {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
         {"key": "TRUST_REMOTE_CODE", "value": "1"},
     ]
     if settings.hf_token:

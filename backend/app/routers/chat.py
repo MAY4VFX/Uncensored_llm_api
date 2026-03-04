@@ -69,6 +69,11 @@ async def chat_completions(
     if not model.runpod_endpoint_id:
         raise HTTPException(status_code=503, detail=f"Model '{request.model}' endpoint not configured")
 
+    # 2b. Validate max_tokens against model context limit
+    max_ctx = model.max_context_length or 4096
+    if request.max_tokens and request.max_tokens > max_ctx:
+        request.max_tokens = max_ctx
+
     # 3. Estimate cost and check credits
     tokens_in_estimate = count_message_tokens(
         [{"role": m.role, "content": m.content} for m in request.messages]

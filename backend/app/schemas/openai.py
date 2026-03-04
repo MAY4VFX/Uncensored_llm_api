@@ -61,6 +61,7 @@ class OpenAIModel(BaseModel):
     object: str = "model"
     created: int
     owned_by: str = "unchained"
+    max_context_length: int = 4096
 
 
 class OpenAIModelList(BaseModel):

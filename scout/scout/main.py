@@ -63,7 +63,7 @@ async def scout_run():
                 continue
 
             quant = determine_quantization(m)
-            gpu_type, _ = select_gpu(params_b, quant)
+            gpu_type, _, max_context = select_gpu(params_b, quant)
             cost_input, cost_output = estimate_cost_per_1m_tokens(params_b, quant)
             slug = _slugify(hf_repo)
 
@@ -91,6 +91,7 @@ async def scout_run():
                 "params_b": params_b,
                 "quantization": quant,
                 "gpu_type": gpu_type,
+                "max_context_length": max_context,
                 "cost_per_1m_input": cost_input,
                 "cost_per_1m_output": cost_output,
                 "description": description,
@@ -111,6 +112,7 @@ async def scout_run():
                     name=f"unch-{slug[:40]}",
                     gpu_type=gpu_type,
                     hf_repo=hf_repo,
+                    max_model_len=max_context,
                 )
                 if endpoint_id:
                     update_model_status(session, db_model.id, "active", endpoint_id)
