@@ -2,29 +2,32 @@
 
 QUANT_MULTIPLIERS = {"Q4": 0.5, "Q8": 1.0, "FP16": 2.0}
 
+# (primary_gpu_id, vram_gb, cost_per_hour, runpod_pool_ids)
+# pool_ids: comma-separated RunPod pool IDs for fallback availability
 GPU_OPTIONS = [
-    ("RTX_4000_Ada_20GB", 8, 0.17),
-    ("RTX_A4500_20GB", 16, 0.22),
-    ("RTX_A5000_24GB", 24, 0.28),
-    ("A100_40GB", 40, 1.19),
-    ("A100_80GB", 80, 1.99),
+    ("RTX_4000_Ada_20GB", 8, 0.17, "AMPERE_16"),
+    ("RTX_A4500_20GB", 16, 0.22, "AMPERE_16"),
+    ("RTX_A5000_24GB", 24, 0.28, "ADA_24,AMPERE_24"),
+    ("A100_40GB", 40, 1.19, "AMPERE_48,ADA_48_PRO"),
+    ("A100_80GB", 80, 1.99, "AMPERE_80,ADA_80_PRO,HOPPER_141"),
 ]
 
 
 def select_gpu(params_b: float, quant: str = "Q4") -> tuple[str, float]:
     """
     Select optimal GPU for a model.
-    Returns (gpu_id, cost_per_hour).
+    Returns (runpod_pool_ids, cost_per_hour).
+    pool_ids is a comma-separated string of RunPod GPU pools for fallback.
     """
     multiplier = QUANT_MULTIPLIERS.get(quant, 1.0)
     vram_needed = params_b * multiplier * 1.3  # 30% overhead
 
-    for gpu_id, vram, cost_hr in GPU_OPTIONS:
+    for _, vram, cost_hr, pool_ids in GPU_OPTIONS:
         if vram_needed <= vram:
-            return gpu_id, cost_hr
+            return pool_ids, cost_hr
 
     # Fallback to largest
-    return GPU_OPTIONS[-1][0], GPU_OPTIONS[-1][2]
+    return GPU_OPTIONS[-1][3], GPU_OPTIONS[-1][2]
 
 
 def estimate_throughput(params_b: float) -> float:
@@ -46,7 +49,7 @@ def estimate_cost_per_1m_tokens(params_b: float, quant: str = "Q4") -> tuple[flo
     Estimate cost per 1M tokens (input, output).
     Returns (cost_1m_input, cost_1m_output).
     """
-    gpu_id, cost_hr = select_gpu(params_b, quant)
+    _pool_ids, cost_hr = select_gpu(params_b, quant)
     throughput = estimate_throughput(params_b)
     cost_per_sec = cost_hr / 3600
     cost_per_1m = (cost_per_sec / throughput) * 1_000_000

@@ -19,11 +19,11 @@ def _headers() -> dict:
 
 
 GPU_ID_MAP = {
-    "RTX_4000_Ada_20GB": "ADA_24",
-    "RTX_A4500_20GB": "ADA_24",
-    "RTX_A5000_24GB": "AMPERE_24",
-    "A100_40GB": "AMPERE_48",
-    "A100_80GB": "AMPERE_80",
+    "RTX_4000_Ada_20GB": "AMPERE_16",
+    "RTX_A4500_20GB": "AMPERE_16",
+    "RTX_A5000_24GB": "ADA_24,AMPERE_24",
+    "A100_40GB": "AMPERE_48,ADA_48_PRO",
+    "A100_80GB": "AMPERE_80,ADA_80_PRO,HOPPER_141",
 }
 
 
