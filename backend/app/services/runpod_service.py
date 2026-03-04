@@ -34,6 +34,7 @@ async def create_endpoint(
     model_name: str = "",
     max_workers: int = 1,
     idle_timeout: int = 30,
+    params_b: float = 0,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
     env_vars = [
@@ -43,6 +44,17 @@ async def create_endpoint(
     ]
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
+
+    # Scale disk size based on model parameters (fp16: ~2 bytes/param + overhead)
+    if params_b >= 20:
+        container_disk = 80
+        volume_gb = 120
+    elif params_b >= 10:
+        container_disk = 60
+        volume_gb = 100
+    else:
+        container_disk = 40
+        volume_gb = 80
 
     async with httpx.AsyncClient(timeout=30) as client:
         # Step 1: Create template
@@ -56,8 +68,8 @@ async def create_endpoint(
                 "name": f"tpl-{name}"[:50],
                 "imageName": docker_image,
                 "dockerArgs": "",
-                "containerDiskInGb": 40,
-                "volumeInGb": 80,
+                "containerDiskInGb": container_disk,
+                "volumeInGb": volume_gb,
                 "env": env_vars,
                 "isServerless": True,
             }

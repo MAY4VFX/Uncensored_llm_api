@@ -26,7 +26,7 @@ export default function PlaygroundPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState("");
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const API_URL = "/api";
 
   useEffect(() => {
     if (!isAuthenticated()) {

@@ -32,7 +32,7 @@ export default function ModelsPage() {
         .catch(() => setModels([]))
         .finally(() => setLoading(false));
     } else {
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/v1/models`)
+      fetch(`/api/v1/models`)
         .then((r) => r.json())
         .then((data) => {
           setModels(
