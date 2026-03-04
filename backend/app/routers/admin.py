@@ -104,6 +104,7 @@ async def deploy_model(
             name=f"unch-{model.slug}",
             gpu_type=model.gpu_type,
             model_name=model.hf_repo,
+            params_b=float(model.params_b or 0),
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
         model.runpod_endpoint_id = endpoint_data.get("id")

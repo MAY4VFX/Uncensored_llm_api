@@ -57,27 +57,27 @@ async def create_endpoint(
         volume_gb = 80
 
     async with httpx.AsyncClient(timeout=30) as client:
-        # Step 1: Create template
-        tmpl_mutation = """
-        mutation saveTemplate($input: TemplateInput!) {
-            saveTemplate(input: $input) { id name }
-        }
-        """
-        tmpl_vars = {
-            "input": {
-                "name": f"tpl-{name}"[:50],
-                "imageName": docker_image,
-                "dockerArgs": "",
-                "containerDiskInGb": container_disk,
-                "volumeInGb": volume_gb,
-                "env": env_vars,
-                "isServerless": True,
-            }
-        }
+        # Step 1: Create template (inline mutation — RunPod doesn't support parameterized variables)
+        tmpl_name = f"tpl-{name}"[:50]
+        env_str = ", ".join(
+            f'{{key: "{e["key"]}", value: "{e["value"]}"}}'
+            for e in env_vars
+        )
+        tmpl_query = (
+            f'mutation {{ saveTemplate(input: {{'
+            f' name: "{tmpl_name}",'
+            f' imageName: "{docker_image}",'
+            f' dockerArgs: "",'
+            f' containerDiskInGb: {container_disk},'
+            f' volumeInGb: {volume_gb},'
+            f' isServerless: true,'
+            f' env: [{env_str}]'
+            f' }}) {{ id name }} }}'
+        )
         tmpl_resp = await client.post(
             RUNPOD_GRAPHQL_URL,
             headers=_headers(),
-            json={"query": tmpl_mutation, "variables": tmpl_vars},
+            json={"query": tmpl_query},
         )
         tmpl_resp.raise_for_status()
         tmpl_data = tmpl_resp.json()
@@ -87,27 +87,23 @@ async def create_endpoint(
 
         # Step 2: Create endpoint with template
         runpod_gpu = GPU_ID_MAP.get(gpu_type, "AMPERE_48")
-        ep_mutation = """
-        mutation saveEndpoint($input: EndpointInput!) {
-            saveEndpoint(input: $input) { id name gpuIds templateId }
-        }
-        """
-        ep_vars = {
-            "input": {
-                "name": name[:50],
-                "templateId": template_id,
-                "gpuIds": runpod_gpu,
-                "workersMin": 0,
-                "workersMax": max_workers,
-                "idleTimeout": idle_timeout,
-                "scalerType": "QUEUE_DELAY",
-                "scalerValue": 3,
-            }
-        }
+        ep_name = name[:50]
+        ep_query = (
+            f'mutation {{ saveEndpoint(input: {{'
+            f' name: "{ep_name}",'
+            f' templateId: "{template_id}",'
+            f' gpuIds: "{runpod_gpu}",'
+            f' workersMin: 0,'
+            f' workersMax: {max_workers},'
+            f' idleTimeout: {idle_timeout},'
+            f' scalerType: "QUEUE_DELAY",'
+            f' scalerValue: 3'
+            f' }}) {{ id name gpuIds templateId }} }}'
+        )
         ep_resp = await client.post(
             RUNPOD_GRAPHQL_URL,
             headers=_headers(),
-            json={"query": ep_mutation, "variables": ep_vars},
+            json={"query": ep_query},
         )
         ep_resp.raise_for_status()
         ep_data = ep_resp.json()
