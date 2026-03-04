@@ -44,10 +44,13 @@ async def proxy_chat_completion(
     output = result.get("output", result)
     if isinstance(output, str):
         output = json.loads(output)
+    # RunPod wraps vLLM output in a list
+    if isinstance(output, list) and len(output) > 0:
+        output = output[0]
 
     # Handle vLLM OpenAI-compat response format
-    choices_data = output.get("choices", [])
-    usage_data = output.get("usage", {})
+    choices_data = output.get("choices", []) if isinstance(output, dict) else []
+    usage_data = output.get("usage", {}) if isinstance(output, dict) else {}
 
     choices = []
     for i, c in enumerate(choices_data):
