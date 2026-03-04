@@ -17,12 +17,12 @@ from app.schemas.openai import (
 from app.services import runpod_service
 
 
-def _build_vllm_payload(request: ChatCompletionRequest) -> dict:
+def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel) -> dict:
     """Transform OpenAI-format request into vLLM-compatible RunPod payload."""
     return {
         "openai_route": "/v1/chat/completions",
         "openai_input": {
-            "model": request.model,
+            "model": model.hf_repo,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
             "temperature": request.temperature,
             "max_tokens": request.max_tokens or 2048,
@@ -37,7 +37,7 @@ async def proxy_chat_completion(
     request: ChatCompletionRequest, model: LlmModel
 ) -> ChatCompletionResponse:
     """Proxy a non-streaming chat completion request to RunPod."""
-    payload = _build_vllm_payload(request)
+    payload = _build_vllm_payload(request, model)
     result = await runpod_service.run_inference(model.runpod_endpoint_id, payload)
 
     # Parse RunPod/vLLM response
@@ -91,7 +91,7 @@ async def proxy_chat_completion_stream(
     request: ChatCompletionRequest, model: LlmModel
 ) -> AsyncGenerator[str, None]:
     """Proxy a streaming chat completion request to RunPod via SSE."""
-    payload = _build_vllm_payload(request)
+    payload = _build_vllm_payload(request, model)
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
