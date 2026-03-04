@@ -129,15 +129,25 @@ async def delete_endpoint(endpoint_id: str) -> None:
 
 
 async def check_worker_status(endpoint_id: str) -> dict:
-    """Check worker readiness. Returns {ready: bool, workers_ready: int, initializing: int, status: str, estimated_wait: int}."""
+    """Check worker readiness. Returns {ready: bool, workers_ready: int, initializing: int, status: str, estimated_wait: int}.
+
+    RunPod worker states:
+    - ready: idle, waiting for jobs
+    - running: actively processing a job (still counts as available)
+    - initializing: starting up (container + model loading)
+    - throttled: queued but no GPU available
+    """
     try:
         health = await get_endpoint_health(endpoint_id)
-        workers_ready = health.get("workers", {}).get("ready", 0) if isinstance(health.get("workers"), dict) else 0
-        initializing = health.get("workers", {}).get("initializing", 0) if isinstance(health.get("workers"), dict) else 0
-        throttled = health.get("workers", {}).get("throttled", 0) if isinstance(health.get("workers"), dict) else 0
+        workers = health.get("workers", {}) if isinstance(health.get("workers"), dict) else {}
+        workers_ready = workers.get("ready", 0)
+        workers_running = workers.get("running", 0)
+        initializing = workers.get("initializing", 0)
+        throttled = workers.get("throttled", 0)
 
-        if workers_ready > 0:
-            return {"ready": True, "workers_ready": workers_ready, "initializing": initializing, "status": "ready", "estimated_wait": 0}
+        total_active = workers_ready + workers_running
+        if total_active > 0:
+            return {"ready": True, "workers_ready": total_active, "initializing": initializing, "status": "ready", "estimated_wait": 0}
         elif initializing > 0:
             return {"ready": False, "workers_ready": 0, "initializing": initializing, "status": "warming_up", "estimated_wait": 120}
         elif throttled > 0:
