@@ -54,7 +54,11 @@ async def playground_chat(
     return StreamingResponse(
         _stream_playground(request, model, user, db),
         media_type="text/event-stream",
-        headers={"X-Content-Type-Options": "nosniff"},
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

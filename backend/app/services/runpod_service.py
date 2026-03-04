@@ -238,7 +238,7 @@ def _extract_text(output) -> str:
 
 
 async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[str, None]:
-    """Run async inference via /run and poll for results, yielding chunks."""
+    """Run async inference via /run and poll /stream for incremental results."""
     url = f"{settings.runpod_base_url}/{endpoint_id}/run"
 
     async with httpx.AsyncClient(timeout=600) as client:
@@ -256,7 +256,13 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
             # Try stream endpoint first
             stream_resp = await client.get(stream_url, headers=_headers())
             if stream_resp.status_code == 200:
-                data = stream_resp.json()
+                # RunPod stream responses contain literal newlines in SSE data —
+                # json.loads strict mode rejects these, so use strict=False
+                try:
+                    data = json.loads(stream_resp.text, strict=False)
+                except (json.JSONDecodeError, ValueError):
+                    data = {"stream": [], "status": None}
+
                 for chunk in data.get("stream", []):
                     output = chunk.get("output", "")
                     text = _extract_text(output)
@@ -264,21 +270,33 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
                         yield text
                         yielded = True
 
-                if data.get("status") in ("COMPLETED", "FAILED"):
-                    break
+                status = data.get("status")
+                if status == "COMPLETED":
+                    return
+                if status == "FAILED":
+                    raise RuntimeError("RunPod job failed")
 
-            # Fallback: check status
+                # If stream returned chunks, skip the status check — poll stream again
+                if data.get("stream"):
+                    await asyncio.sleep(0.3)
+                    continue
+
+            # Fallback: check status when stream is empty (cold start / queue)
             status_resp = await client.get(status_url, headers=_headers())
-            status_data = status_resp.json()
-            if status_data.get("status") == "COMPLETED":
-                # Only yield from status if stream didn't return anything
+            try:
+                status_data = json.loads(status_resp.text, strict=False)
+            except (json.JSONDecodeError, ValueError):
+                status_data = {}
+
+            job_status = status_data.get("status")
+            if job_status == "COMPLETED":
                 if not yielded:
                     output = status_data.get("output", "")
                     text = _extract_text(output)
                     if text:
                         yield text
-                break
-            elif status_data.get("status") == "FAILED":
+                return
+            elif job_status == "FAILED":
                 raise RuntimeError(f"RunPod job failed: {status_data.get('error')}")
 
             await asyncio.sleep(0.5)

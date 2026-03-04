@@ -93,6 +93,10 @@ async def chat_completions(
         return StreamingResponse(
             _stream_and_track(request, model, user, api_key, db),
             media_type="text/event-stream",
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+            },
         )
 
     # Non-streaming
