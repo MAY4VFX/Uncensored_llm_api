@@ -27,7 +27,7 @@ def _status_message(status: str) -> str:
     return messages.get(status, "Preparing worker...")
 
 
-def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel) -> dict:
+def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream: bool = False) -> dict:
     """Transform OpenAI-format request into vLLM-compatible RunPod payload."""
     return {
         "openai_route": "/v1/chat/completions",
@@ -37,7 +37,7 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel) -> dict
             "temperature": request.temperature,
             "max_tokens": request.max_tokens or 2048,
             "top_p": request.top_p,
-            "stream": False,
+            "stream": stream,
             "stop": request.stop,
         },
     }
@@ -101,7 +101,7 @@ async def proxy_chat_completion_stream(
     request: ChatCompletionRequest, model: LlmModel
 ) -> AsyncGenerator[str, None]:
     """Proxy a streaming chat completion request to RunPod via SSE."""
-    payload = _build_vllm_payload(request, model)
+    payload = _build_vllm_payload(request, model, stream=True)
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
@@ -128,10 +128,13 @@ async def proxy_chat_completion_stream(
     # Stream content from RunPod
     first_token_received = False
     async for text_chunk in runpod_service.stream_inference(model.runpod_endpoint_id, payload):
+        if not text_chunk:
+            continue
         if not first_token_received and not worker_status["ready"]:
             first_token_received = True
             ready_event = {"object": "status", "status": "ready", "message": "Worker ready, generating..."}
             yield f"data: {json.dumps(ready_event)}\n\n"
+        first_token_received = True
         chunk = ChatCompletionChunk(
             id=completion_id,
             created=created,
