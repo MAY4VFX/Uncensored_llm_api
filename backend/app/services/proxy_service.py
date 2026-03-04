@@ -17,6 +17,16 @@ from app.schemas.openai import (
 from app.services import runpod_service
 
 
+def _status_message(status: str) -> str:
+    """Human-readable message for worker status."""
+    messages = {
+        "cold": "Model is cold, worker starting up... Please wait ~2-3 minutes.",
+        "warming_up": "Worker is initializing... Please wait ~1-2 minutes.",
+        "throttled": "Workers are throttled due to high demand. Please wait ~3-5 minutes.",
+    }
+    return messages.get(status, "Preparing worker...")
+
+
 def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel) -> dict:
     """Transform OpenAI-format request into vLLM-compatible RunPod payload."""
     return {
@@ -95,6 +105,17 @@ async def proxy_chat_completion_stream(
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
+    # Check worker status before starting inference
+    worker_status = await runpod_service.check_worker_status(model.runpod_endpoint_id)
+    if not worker_status["ready"]:
+        status_event = {
+            "object": "status",
+            "status": worker_status["status"],
+            "message": _status_message(worker_status["status"]),
+            "estimated_wait": worker_status["estimated_wait"],
+        }
+        yield f"data: {json.dumps(status_event)}\n\n"
+
     # Send initial role chunk
     initial_chunk = ChatCompletionChunk(
         id=completion_id,
@@ -105,7 +126,12 @@ async def proxy_chat_completion_stream(
     yield f"data: {initial_chunk.model_dump_json()}\n\n"
 
     # Stream content from RunPod
+    first_token_received = False
     async for text_chunk in runpod_service.stream_inference(model.runpod_endpoint_id, payload):
+        if not first_token_received and not worker_status["ready"]:
+            first_token_received = True
+            ready_event = {"object": "status", "status": "ready", "message": "Worker ready, generating..."}
+            yield f"data: {json.dumps(ready_event)}\n\n"
         chunk = ChatCompletionChunk(
             id=completion_id,
             created=created,

@@ -7,7 +7,7 @@ import { getMe } from "@/lib/api";
 
 interface Message {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -15,6 +15,8 @@ interface ModelOption {
   id: string;
   name: string;
 }
+
+type WorkerStatus = "ready" | "cold" | "warming_up" | "throttled" | "unknown" | "loading" | null;
 
 export default function PlaygroundPage() {
   const router = useRouter();
@@ -25,6 +27,7 @@ export default function PlaygroundPage() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState("");
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatus>(null);
 
   const API_URL = "/api";
 
@@ -46,6 +49,19 @@ export default function PlaygroundPage() {
       })
       .catch(() => {});
   }, [router, API_URL]);
+
+  // Check worker status when model changes
+  useEffect(() => {
+    if (!selectedModel) {
+      setWorkerStatus(null);
+      return;
+    }
+    setWorkerStatus("loading");
+    fetch(`${API_URL}/v1/models/${encodeURIComponent(selectedModel)}/status`)
+      .then((r) => r.json())
+      .then((data) => setWorkerStatus(data.status as WorkerStatus))
+      .catch(() => setWorkerStatus("unknown"));
+  }, [selectedModel, API_URL]);
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming || !selectedModel) return;
@@ -108,6 +124,31 @@ export default function PlaygroundPage() {
 
               try {
                 const parsed = JSON.parse(data);
+
+                // Handle status events (worker warming up / ready)
+                if (parsed.object === "status") {
+                  const statusMsg = parsed.status as WorkerStatus;
+                  setWorkerStatus(statusMsg);
+                  if (statusMsg !== "ready") {
+                    // Show status as system message in chat
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === assistantId
+                          ? { ...m, content: parsed.message || "Worker starting..." }
+                          : m
+                      )
+                    );
+                  } else {
+                    // Worker ready — clear the status message, reset to empty for real content
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === assistantId ? { ...m, content: "" } : m
+                      )
+                    );
+                  }
+                  continue;
+                }
+
                 const delta = parsed.choices?.[0]?.delta?.content;
                 if (delta) {
                   setMessages((prev) =>
@@ -124,8 +165,9 @@ export default function PlaygroundPage() {
         }
       }
 
-      // Refresh user credits
+      // Refresh user credits and worker status
       getMe(token).then(setUser);
+      setWorkerStatus("ready");
     } catch (err: any) {
       setError(err.message);
       // Remove empty assistant message on error
@@ -168,6 +210,31 @@ export default function PlaygroundPage() {
               </option>
             ))}
           </select>
+
+          {workerStatus && workerStatus !== "loading" && (
+            <span
+              className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 border ${
+                workerStatus === "ready"
+                  ? "text-green-400 border-green-800 bg-green-950/40"
+                  : workerStatus === "cold"
+                  ? "text-yellow-400 border-yellow-800 bg-yellow-950/40"
+                  : workerStatus === "warming_up"
+                  ? "text-orange-400 border-orange-800 bg-orange-950/40"
+                  : workerStatus === "throttled"
+                  ? "text-red-400 border-red-800 bg-red-950/40"
+                  : "text-surface-700 border-surface-400"
+              }`}
+            >
+              {workerStatus === "ready" && "Ready"}
+              {workerStatus === "cold" && "Cold — ~2 min startup"}
+              {workerStatus === "warming_up" && "Warming up..."}
+              {workerStatus === "throttled" && "Throttled"}
+              {workerStatus === "unknown" && "Status unknown"}
+            </span>
+          )}
+          {workerStatus === "loading" && (
+            <span className="text-[10px] font-mono text-surface-700">checking...</span>
+          )}
         </div>
 
         <div className="flex items-center gap-6">
@@ -212,9 +279,13 @@ export default function PlaygroundPage() {
                 <pre className="text-sm text-neutral-300 font-mono whitespace-pre-wrap break-words leading-relaxed">
                   {m.content}
                   {m.role === "assistant" && isStreaming && m.content === "" && (
-                    <span className="text-terminal-500 animate-blink">_</span>
+                    <span className="text-terminal-500 animate-blink">
+                      {workerStatus === "cold" || workerStatus === "warming_up" || workerStatus === "throttled"
+                        ? "..."
+                        : "_"}
+                    </span>
                   )}
-                  {m.role === "assistant" && isStreaming && m.content !== "" && (
+                  {m.role === "assistant" && isStreaming && m.content !== "" && workerStatus !== "cold" && workerStatus !== "warming_up" && workerStatus !== "throttled" && (
                     <span className="text-terminal-500 animate-blink">|</span>
                   )}
                 </pre>

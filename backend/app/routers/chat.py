@@ -10,11 +10,35 @@ from app.models.api_key import ApiKey
 from app.models.llm_model import LlmModel
 from app.models.user import User
 from app.schemas.openai import ChatCompletionRequest, ChatCompletionResponse
-from app.services import proxy_service
+from app.services import proxy_service, runpod_service
 from app.services.credits_service import check_credits, deduct_credits
 from app.services.usage_service import calculate_cost, count_message_tokens, log_usage
 
 router = APIRouter(tags=["chat"])
+
+
+@router.get("/v1/models/{model_slug}/status")
+async def model_status(
+    model_slug: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Check worker status for a model (ready/cold/warming_up/throttled)."""
+    result = await db.execute(
+        select(LlmModel).where(LlmModel.slug == model_slug, LlmModel.status == "active")
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=404, detail=f"Model '{model_slug}' not found or not active")
+
+    if not model.runpod_endpoint_id:
+        return {"status": "unavailable", "estimated_wait_seconds": 0, "message": "Endpoint not configured"}
+
+    worker = await runpod_service.check_worker_status(model.runpod_endpoint_id)
+    return {
+        "status": worker["status"],
+        "estimated_wait_seconds": worker["estimated_wait"],
+        "workers_ready": worker["workers_ready"],
+    }
 
 
 @router.post("/v1/chat/completions")

@@ -128,10 +128,30 @@ async def delete_endpoint(endpoint_id: str) -> None:
         resp.raise_for_status()
 
 
+async def check_worker_status(endpoint_id: str) -> dict:
+    """Check worker readiness. Returns {ready: bool, workers_ready: int, initializing: int, status: str, estimated_wait: int}."""
+    try:
+        health = await get_endpoint_health(endpoint_id)
+        workers_ready = health.get("workers", {}).get("ready", 0) if isinstance(health.get("workers"), dict) else 0
+        initializing = health.get("workers", {}).get("initializing", 0) if isinstance(health.get("workers"), dict) else 0
+        throttled = health.get("workers", {}).get("throttled", 0) if isinstance(health.get("workers"), dict) else 0
+
+        if workers_ready > 0:
+            return {"ready": True, "workers_ready": workers_ready, "initializing": initializing, "status": "ready", "estimated_wait": 0}
+        elif initializing > 0:
+            return {"ready": False, "workers_ready": 0, "initializing": initializing, "status": "warming_up", "estimated_wait": 120}
+        elif throttled > 0:
+            return {"ready": False, "workers_ready": 0, "initializing": 0, "status": "throttled", "estimated_wait": 300}
+        else:
+            return {"ready": False, "workers_ready": 0, "initializing": 0, "status": "cold", "estimated_wait": 180}
+    except Exception:
+        return {"ready": True, "workers_ready": 0, "initializing": 0, "status": "unknown", "estimated_wait": 0}
+
+
 async def run_inference(endpoint_id: str, payload: dict) -> dict:
     """Run inference via RunPod /runsync, polling /status if IN_QUEUE."""
     url = f"{settings.runpod_base_url}/{endpoint_id}/runsync"
-    async with httpx.AsyncClient(timeout=300) as client:
+    async with httpx.AsyncClient(timeout=600) as client:
         resp = await client.post(url, headers=_headers(), json={"input": payload})
         resp.raise_for_status()
         data = resp.json()
@@ -146,7 +166,7 @@ async def run_inference(endpoint_id: str, payload: dict) -> dict:
             return data
 
         status_url = f"{settings.runpod_base_url}/{endpoint_id}/status/{job_id}"
-        for _ in range(120):  # up to ~120 seconds
+        for _ in range(360):  # up to ~360 seconds for cold starts
             await asyncio.sleep(1)
             status_resp = await client.get(status_url, headers=_headers())
             status_data = status_resp.json()
@@ -163,7 +183,7 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
     """Run async inference via /run and poll for results, yielding chunks."""
     url = f"{settings.runpod_base_url}/{endpoint_id}/run"
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=600) as client:
         # Submit job
         resp = await client.post(url, headers=_headers(), json={"input": payload})
         resp.raise_for_status()
