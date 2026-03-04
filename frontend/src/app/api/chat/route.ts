@@ -1,6 +1,6 @@
 export const maxDuration = 120;
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 export async function POST(req: Request) {
   const { messages, model: modelSlug } = await req.json();
