@@ -197,11 +197,13 @@ def _extract_text(output) -> str:
         # Can be single "data: {...}" or multiple "data: {...}\n\ndata: {...}\n\n"
         if "data: " in output:
             parts = []
+            parsed_any = False
             for line in output.split("\n"):
                 line = line.strip()
                 if line.startswith("data: ") and line != "data: [DONE]":
                     try:
                         parsed = json.loads(line[6:])
+                        parsed_any = True
                         choices = parsed.get("choices", [])
                         if choices:
                             delta = choices[0].get("delta", {})
@@ -210,7 +212,7 @@ def _extract_text(output) -> str:
                                 parts.append(content)
                     except (json.JSONDecodeError, ValueError):
                         pass
-            if parts:
+            if parsed_any:
                 return "".join(parts)
         return output
     if isinstance(output, list) and len(output) > 0:
