@@ -96,6 +96,7 @@ export const listAllModels = (token: string) =>
       params_b: number;
       quantization: string;
       gpu_type: string;
+      gpu_count: number;
       status: string;
       cost_per_1m_input: number;
       cost_per_1m_output: number;
