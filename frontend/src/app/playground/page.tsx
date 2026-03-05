@@ -17,7 +17,7 @@ interface ModelOption {
   maxContext: number;
 }
 
-type WorkerStatus = "ready" | "sleep" | "warming_up" | "throttled" | "unknown" | "loading" | null;
+type WorkerStatus = "ready" | "idle" | "sleep" | "warming_up" | "throttled" | "unknown" | "loading" | null;
 
 // --- Think tag parser ---
 function ThinkBlock({ content }: { content: string }) {
@@ -212,6 +212,8 @@ export default function PlaygroundPage() {
           mapped = "ready";
         } else if (s === "warming_up" || s === "initializing") {
           mapped = "warming_up";
+        } else if (s === "idle") {
+          mapped = "idle";
         } else if (s === "throttled" || throttled > 0) {
           mapped = "throttled";
         } else if (s === "cold" || s === "unknown") {
@@ -312,6 +314,8 @@ export default function PlaygroundPage() {
           mapped = "ready";
         } else if (s === "warming_up" || s === "initializing") {
           mapped = "warming_up";
+        } else if (s === "idle") {
+          mapped = "idle";
         } else if (s === "throttled" || throttled > 0) {
           mapped = "throttled";
         } else if (s === "cold" || s === "unknown") {
@@ -332,7 +336,7 @@ export default function PlaygroundPage() {
             }).catch(() => {});
           }
           startPolling(selectedModel, 5000);
-        } else if (mapped === "warming_up") {
+        } else if (mapped === "warming_up" || mapped === "idle") {
           startPolling(selectedModel, 5000);
         } else if (mapped === "ready") {
           // Keep polling slowly — worker may sleep after idle_timeout (30s)
@@ -556,6 +560,8 @@ export default function PlaygroundPage() {
               className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 border ${
                 workerStatus === "ready"
                   ? "text-green-400 border-green-800 bg-green-950/40"
+                  : workerStatus === "idle"
+                  ? "text-yellow-400 border-yellow-800 bg-yellow-950/40"
                   : workerStatus === "sleep"
                   ? "text-blue-400 border-blue-800 bg-blue-950/40"
                   : workerStatus === "warming_up"
@@ -566,6 +572,7 @@ export default function PlaygroundPage() {
               }`}
             >
               {workerStatus === "ready" && "Ready"}
+              {workerStatus === "idle" && "Idle ~60s"}
               {workerStatus === "sleep" && "Sleep"}
               {workerStatus === "warming_up" && "Warming up..."}
               {workerStatus === "throttled" && "Throttled"}
@@ -576,7 +583,7 @@ export default function PlaygroundPage() {
             <span className="text-[10px] font-mono text-surface-700">checking...</span>
           )}
 
-          {(workerStatus === "ready" || workerStatus === "warming_up") && !isStreaming && (
+          {(workerStatus === "ready" || workerStatus === "idle" || workerStatus === "warming_up") && !isStreaming && (
             <button
               onClick={handleTerminate}
               disabled={terminating}
