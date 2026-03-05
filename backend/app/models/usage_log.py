@@ -17,6 +17,7 @@ class UsageLog(Base):
     model_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("llm_models.id"), nullable=False)
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    gpu_seconds: Mapped[float] = mapped_column(nullable=False, default=0.0)
     cost: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

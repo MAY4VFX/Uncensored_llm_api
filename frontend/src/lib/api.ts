@@ -74,12 +74,14 @@ export const getUsage = (token: string) =>
   apiFetch<{
     total_tokens_in: number;
     total_tokens_out: number;
+    total_gpu_seconds: number;
     total_cost: number;
     credits_remaining: number;
     recent_usage: Array<{
       model_slug: string;
       tokens_in: number;
       tokens_out: number;
+      gpu_seconds: number;
       cost: number;
       created_at: string;
     }>;

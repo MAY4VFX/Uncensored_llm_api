@@ -30,6 +30,7 @@ class LlmModel(Base):
     cost_per_1m_output: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0.0)
     gpu_hourly_cost: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0.0)
     keep_warm_price: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0.0)
+    margin_multiplier: Mapped[float] = mapped_column(nullable=False, default=1.5)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     hf_downloads: Mapped[int | None] = mapped_column(nullable=True)
     hf_likes: Mapped[int | None] = mapped_column(nullable=True)

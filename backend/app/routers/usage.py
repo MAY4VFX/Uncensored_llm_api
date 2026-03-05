@@ -22,10 +22,11 @@ async def my_usage(
         select(
             func.coalesce(func.sum(UsageLog.tokens_in), 0),
             func.coalesce(func.sum(UsageLog.tokens_out), 0),
+            func.coalesce(func.sum(UsageLog.gpu_seconds), 0),
             func.coalesce(func.sum(UsageLog.cost), 0),
         ).where(UsageLog.user_id == user.id)
     )
-    total_in, total_out, total_cost = totals.one()
+    total_in, total_out, total_gpu_seconds, total_cost = totals.one()
 
     # Recent usage (last 50 entries)
     recent = await db.execute(
@@ -41,6 +42,7 @@ async def my_usage(
             model_slug=slug,
             tokens_in=log.tokens_in,
             tokens_out=log.tokens_out,
+            gpu_seconds=float(log.gpu_seconds or 0),
             cost=float(log.cost),
             created_at=log.created_at,
         )
@@ -50,6 +52,7 @@ async def my_usage(
     return UsageSummary(
         total_tokens_in=int(total_in),
         total_tokens_out=int(total_out),
+        total_gpu_seconds=float(total_gpu_seconds),
         total_cost=float(total_cost),
         credits_remaining=float(user.credits),
         recent_usage=recent_entries,

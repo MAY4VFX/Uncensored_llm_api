@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -13,7 +15,9 @@ from app.schemas.openai import ChatCompletionRequest, ChatCompletionResponse
 from app.services import proxy_service, runpod_service
 from app.config import settings
 from app.services.credits_service import check_credits, deduct_credits
-from app.services.usage_service import calculate_cost, count_message_tokens, log_usage
+from app.services.usage_service import (
+    calculate_gpu_cost, count_message_tokens, estimate_max_cost, log_usage,
+)
 
 router = APIRouter(tags=["chat"])
 
@@ -85,11 +89,7 @@ async def terminate_model(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Stop the worker by setting idle timeout to minimum (5s).
-
-    The endpoint stays alive — next request will trigger a cold start
-    and /warm will restore the normal idle timeout.
-    """
+    """Stop the worker by setting idle timeout to minimum (5s)."""
     result = await db.execute(
         select(LlmModel).where(LlmModel.slug == model_slug, LlmModel.status == "active")
     )
@@ -131,8 +131,6 @@ async def chat_completions(
 
     # 2b. Validate max_tokens against model context limit
     max_ctx = model.max_context_length or 4096
-
-    # 3. Estimate cost and check credits
     tokens_in_estimate = count_message_tokens(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
@@ -144,12 +142,10 @@ async def chat_completions(
     else:
         request.max_tokens = max_possible_output
 
-    estimated_cost = calculate_cost(
-        tokens_in_estimate,
-        request.max_tokens,
-        float(model.cost_per_1m_input),
-        float(model.cost_per_1m_output),
-    )
+    # 3. Pre-auth: estimate max GPU cost and check credits
+    gpu_hourly = float(model.gpu_hourly_cost or 0)
+    margin = float(model.margin_multiplier or 1.5)
+    estimated_cost = estimate_max_cost(request.max_tokens, gpu_hourly, margin)
 
     if not await check_credits(db, user.id, estimated_cost):
         raise HTTPException(status_code=402, detail="Insufficient credits")
@@ -166,19 +162,17 @@ async def chat_completions(
         )
 
     # Non-streaming
+    t_start = time.monotonic()
     response = await proxy_service.proxy_chat_completion(request, model)
+    gpu_seconds = time.monotonic() - t_start
 
-    # 5. Track usage
-    actual_cost = calculate_cost(
-        response.usage.prompt_tokens,
-        response.usage.completion_tokens,
-        float(model.cost_per_1m_input),
-        float(model.cost_per_1m_output),
-    )
+    # 5. Track usage — bill by GPU time
+    actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
     await deduct_credits(db, user.id, actual_cost)
     await log_usage(
         db, user.id, api_key.id, model.id,
-        response.usage.prompt_tokens, response.usage.completion_tokens, actual_cost,
+        response.usage.prompt_tokens, response.usage.completion_tokens,
+        actual_cost, gpu_seconds,
     )
 
     return response
@@ -191,30 +185,51 @@ async def _stream_and_track(
     api_key: ApiKey,
     db: AsyncSession,
 ):
-    """Stream response and track usage after completion."""
+    """Stream response and track usage after completion.
+
+    Bills by actual GPU time: measures wall-clock from first content token
+    to stream end (excludes queue/cold-start wait).
+    """
+    gpu_hourly = float(model.gpu_hourly_cost or 0)
+    margin = float(model.margin_multiplier or 1.5)
+
     full_output = []
+    gpu_start = None  # Set when first real content arrives
+
     async for chunk in proxy_service.proxy_chat_completion_stream(request, model):
-        # Collect content for accurate token counting
+        # Parse content from SSE chunks for token counting
         if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
             try:
                 import json as _json
                 data = _json.loads(chunk[6:])
+                # Skip status events (queue updates)
+                if data.get("object") == "status":
+                    yield chunk
+                    continue
                 content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
                 if content:
+                    if gpu_start is None:
+                        gpu_start = time.monotonic()
                     full_output.append(content)
             except (ValueError, IndexError, KeyError):
                 pass
         yield chunk
 
-    total_output_tokens = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}]) if full_output else 0
+    gpu_end = time.monotonic()
+    gpu_seconds = (gpu_end - gpu_start) if gpu_start else 0.0
 
-    # Track usage after stream completes
+    # Count tokens for logging (informational, not for billing)
     tokens_in = count_message_tokens(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
-    actual_cost = calculate_cost(
-        tokens_in, total_output_tokens,
-        float(model.cost_per_1m_input), float(model.cost_per_1m_output),
-    )
+    tokens_out = count_message_tokens(
+        [{"role": "assistant", "content": "".join(full_output)}]
+    ) if full_output else 0
+
+    # Bill by GPU time
+    actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
     await deduct_credits(db, user.id, actual_cost)
-    await log_usage(db, user.id, api_key.id, model.id, tokens_in, total_output_tokens, actual_cost)
+    await log_usage(
+        db, user.id, api_key.id, model.id,
+        tokens_in, tokens_out, actual_cost, gpu_seconds,
+    )

@@ -8,12 +8,14 @@ export default function UsageChart() {
   const [usage, setUsage] = useState<{
     total_tokens_in: number;
     total_tokens_out: number;
+    total_gpu_seconds: number;
     total_cost: number;
     credits_remaining: number;
     recent_usage: Array<{
       model_slug: string;
       tokens_in: number;
       tokens_out: number;
+      gpu_seconds: number;
       cost: number;
       created_at: string;
     }>;
@@ -29,14 +31,21 @@ export default function UsageChart() {
   if (error) return <p className="text-red-500 font-mono text-sm">{error}</p>;
   if (!usage) return <p className="text-surface-800 font-mono text-sm">Loading usage data...</p>;
 
+  const formatGpuTime = (seconds: number) => {
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs.toFixed(0)}s`;
+  };
+
   return (
     <div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-surface-300 border border-surface-300 mb-8">
         {[
           { label: "Credits", value: `$${usage.credits_remaining.toFixed(4)}` },
           { label: "Total Cost", value: `$${usage.total_cost.toFixed(4)}` },
-          { label: "Tokens In", value: usage.total_tokens_in.toLocaleString() },
-          { label: "Tokens Out", value: usage.total_tokens_out.toLocaleString() },
+          { label: "GPU Time", value: formatGpuTime(usage.total_gpu_seconds || 0) },
+          { label: "Requests", value: usage.recent_usage.length.toString() },
         ].map((stat) => (
           <div key={stat.label} className="bg-surface-50 p-5">
             <p className="text-[10px] font-mono uppercase tracking-widest text-surface-800 mb-1">{stat.label}</p>
@@ -51,18 +60,18 @@ export default function UsageChart() {
           <thead>
             <tr className="text-surface-800 text-left border-b border-surface-400">
               <th className="p-3 uppercase tracking-widest">Model</th>
-              <th className="p-3 uppercase tracking-widest">In</th>
-              <th className="p-3 uppercase tracking-widest">Out</th>
+              <th className="p-3 uppercase tracking-widest">GPU Time</th>
+              <th className="p-3 uppercase tracking-widest">Tokens</th>
               <th className="p-3 uppercase tracking-widest">Cost</th>
-              <th className="p-3 uppercase tracking-widest">Time</th>
+              <th className="p-3 uppercase tracking-widest">When</th>
             </tr>
           </thead>
           <tbody>
             {usage.recent_usage.map((entry, i) => (
               <tr key={i} className="border-t border-surface-300 text-neutral-400 hover:bg-surface-100 transition-colors">
                 <td className="p-3 text-terminal-400">{entry.model_slug}</td>
-                <td className="p-3">{entry.tokens_in.toLocaleString()}</td>
-                <td className="p-3">{entry.tokens_out.toLocaleString()}</td>
+                <td className="p-3">{entry.gpu_seconds > 0 ? `${entry.gpu_seconds.toFixed(1)}s` : "—"}</td>
+                <td className="p-3">{entry.tokens_in + entry.tokens_out > 0 ? `${entry.tokens_in}→${entry.tokens_out}` : "—"}</td>
                 <td className="p-3">${entry.cost.toFixed(6)}</td>
                 <td className="p-3 text-surface-800">{new Date(entry.created_at).toLocaleString()}</td>
               </tr>
