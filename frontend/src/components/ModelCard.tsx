@@ -1,4 +1,5 @@
 interface ModelCardProps {
+  id: string;
   slug: string;
   displayName: string;
   paramsB: number;
@@ -8,6 +9,9 @@ interface ModelCardProps {
   costInput: number;
   costOutput: number;
   description: string | null;
+  isAdmin?: boolean;
+  onDeploy?: (modelId: string) => void;
+  deploying?: boolean;
 }
 
 const statusConfig: Record<string, { color: string; dot: string }> = {
@@ -18,6 +22,7 @@ const statusConfig: Record<string, { color: string; dot: string }> = {
 };
 
 export default function ModelCard({
+  id,
   slug,
   displayName,
   paramsB,
@@ -27,6 +32,9 @@ export default function ModelCard({
   costInput,
   costOutput,
   description,
+  isAdmin,
+  onDeploy,
+  deploying,
 }: ModelCardProps) {
   const st = statusConfig[status] || statusConfig.inactive;
 
@@ -65,8 +73,17 @@ export default function ModelCard({
         </div>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-surface-300">
+      <div className="mt-3 pt-3 border-t border-surface-300 flex items-center justify-between">
         <code className="text-[10px] font-mono text-surface-700 break-all">{slug}</code>
+        {isAdmin && (status === "inactive" || status === "pending") && onDeploy && (
+          <button
+            onClick={() => onDeploy(id)}
+            disabled={deploying}
+            className="text-[10px] font-mono uppercase tracking-wider px-3 py-1 border text-terminal-400 border-terminal-800 bg-terminal-950/40 hover:bg-terminal-900/60 transition-colors disabled:opacity-40"
+          >
+            {deploying ? "Deploying..." : "Deploy"}
+          </button>
+        )}
       </div>
     </div>
   );

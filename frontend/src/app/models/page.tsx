@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ModelCard from "@/components/ModelCard";
-import { listAllModels } from "@/lib/api";
+import { listAllModels, deployModel, getMe } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
 interface Model {
@@ -23,10 +23,13 @@ export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [deployingId, setDeployingId] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getToken();
     if (token) {
+      getMe(token).then((u) => setIsAdmin(u.is_admin)).catch(() => {});
       listAllModels(token)
         .then(setModels)
         .catch(() => setModels([]))
@@ -55,6 +58,20 @@ export default function ModelsPage() {
         .finally(() => setLoading(false));
     }
   }, []);
+
+  const handleDeploy = async (modelId: string) => {
+    const token = getToken();
+    if (!token) return;
+    setDeployingId(modelId);
+    try {
+      await deployModel(token, modelId);
+      setModels((prev) => prev.map((m) => m.id === modelId ? { ...m, status: "deploying" } : m));
+    } catch (e: any) {
+      alert(e.message || "Deploy failed");
+    } finally {
+      setDeployingId(null);
+    }
+  };
 
   const filtered = models.filter(
     (m) =>
@@ -96,6 +113,7 @@ export default function ModelsPage() {
           {filtered.map((m) => (
             <ModelCard
               key={m.id}
+              id={m.id}
               slug={m.slug}
               displayName={m.display_name}
               paramsB={m.params_b}
@@ -105,6 +123,9 @@ export default function ModelsPage() {
               costInput={m.cost_per_1m_input}
               costOutput={m.cost_per_1m_output}
               description={m.description}
+              isAdmin={isAdmin}
+              onDeploy={handleDeploy}
+              deploying={deployingId === m.id}
             />
           ))}
         </div>
