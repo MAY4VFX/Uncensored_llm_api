@@ -139,7 +139,7 @@ export default function Home() {
           <span className="text-xs font-mono text-surface-700 uppercase tracking-widest">
             Unchained_API
           </span>
-          <div className="flex gap-8">
+          <div className="flex gap-8 flex-wrap">
             <Link href="/docs" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
               Docs
             </Link>
@@ -148,6 +148,15 @@ export default function Home() {
             </Link>
             <Link href="/playground" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
               Playground
+            </Link>
+            <Link href="/terms" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
+              Terms
+            </Link>
+            <Link href="/privacy" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
+              Privacy
+            </Link>
+            <Link href="/refund" className="text-xs font-mono text-surface-800 hover:text-terminal-400 uppercase tracking-widest transition-colors">
+              Refunds
             </Link>
           </div>
         </div>
