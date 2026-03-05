@@ -18,6 +18,15 @@ def _headers() -> dict:
     }
 
 
+def _graphql_url() -> str:
+    """GraphQL URL with api_key as query param (RunPod requires this for auth)."""
+    return f"{RUNPOD_GRAPHQL_URL}?api_key={settings.runpod_api_key}"
+
+
+def _graphql_headers() -> dict:
+    return {"Content-Type": "application/json"}
+
+
 GPU_ID_MAP = {
     "RTX_4000_Ada_20GB": "AMPERE_16",
     "RTX_A4500_20GB": "AMPERE_16",
@@ -90,8 +99,8 @@ async def create_endpoint(
             f' }}) {{ id name }} }}'
         )
         tmpl_resp = await client.post(
-            RUNPOD_GRAPHQL_URL,
-            headers=_headers(),
+            _graphql_url(),
+            headers=_graphql_headers(),
             json={"query": tmpl_query},
         )
         tmpl_resp.raise_for_status()
@@ -118,8 +127,8 @@ async def create_endpoint(
             f' }}) {{ id name gpuIds templateId }} }}'
         )
         ep_resp = await client.post(
-            RUNPOD_GRAPHQL_URL,
-            headers=_headers(),
+            _graphql_url(),
+            headers=_graphql_headers(),
             json={"query": ep_query},
         )
         ep_resp.raise_for_status()
@@ -132,7 +141,7 @@ async def create_endpoint(
 async def _get_endpoint_config(client: httpx.AsyncClient, endpoint_id: str) -> dict:
     """Fetch current endpoint config to preserve fields in saveEndpoint mutations."""
     query = 'query { myself { endpoints { id name gpuIds gpuCount workersMin workersMax idleTimeout } } }'
-    resp = await client.post(RUNPOD_GRAPHQL_URL, headers=_headers(), json={"query": query})
+    resp = await client.post(_graphql_url(), headers=_graphql_headers(), json={"query": query})
     resp.raise_for_status()
     data = resp.json()
     endpoints = data.get("data", {}).get("myself", {}).get("endpoints", [])
@@ -159,8 +168,8 @@ async def update_endpoint_idle_timeout(endpoint_id: str, idle_timeout: int) -> N
             f' }}) {{ id idleTimeout }} }}'
         )
         resp = await client.post(
-            RUNPOD_GRAPHQL_URL,
-            headers=_headers(),
+            _graphql_url(),
+            headers=_graphql_headers(),
             json={"query": mutation},
         )
         resp.raise_for_status()
@@ -188,8 +197,8 @@ async def update_endpoint_workers_min(endpoint_id: str, workers_min: int) -> Non
             f' }}) {{ id workersMin workersMax }} }}'
         )
         resp = await client.post(
-            RUNPOD_GRAPHQL_URL,
-            headers=_headers(),
+            _graphql_url(),
+            headers=_graphql_headers(),
             json={"query": mutation},
         )
         resp.raise_for_status()
@@ -207,8 +216,8 @@ async def delete_endpoint(endpoint_id: str) -> None:
     """
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            RUNPOD_GRAPHQL_URL,
-            headers=_headers(),
+            _graphql_url(),
+            headers=_graphql_headers(),
             json={"query": mutation, "variables": {"id": endpoint_id}},
         )
         resp.raise_for_status()
