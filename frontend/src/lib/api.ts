@@ -108,3 +108,9 @@ export const deployModel = (token: string, modelId: string) =>
     method: "POST",
     token,
   });
+
+export const terminateModel = (token: string, modelSlug: string) =>
+  apiFetch<{ status: string; message: string }>(`/v1/models/${modelSlug}/terminate`, {
+    method: "POST",
+    token,
+  });

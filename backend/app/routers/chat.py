@@ -48,13 +48,19 @@ async def warm_model(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Trigger worker wake-up without waiting for full inference."""
+    """Trigger worker wake-up and restore normal idle timeout."""
     result = await db.execute(
         select(LlmModel).where(LlmModel.slug == model_slug, LlmModel.status == "active")
     )
     model = result.scalar_one_or_none()
     if not model or not model.runpod_endpoint_id:
         raise HTTPException(status_code=404, detail="Model not found or endpoint not configured")
+
+    # Restore idle timeout to default (30s) in case it was reduced by /terminate
+    try:
+        await runpod_service.update_endpoint_idle_timeout(model.runpod_endpoint_id, 30)
+    except Exception:
+        pass  # Non-critical
 
     import httpx
     url = f"{settings.runpod_base_url}/{model.runpod_endpoint_id}/run"
@@ -70,6 +76,28 @@ async def warm_model(
     except Exception:
         pass  # Fire-and-forget: don't fail if RunPod is slow
     return {"status": "warming"}
+
+
+@router.post("/v1/models/{model_slug}/terminate")
+async def terminate_model(
+    model_slug: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop the worker by setting idle timeout to minimum (5s).
+
+    The endpoint stays alive — next request will trigger a cold start
+    and /warm will restore the normal idle timeout.
+    """
+    result = await db.execute(
+        select(LlmModel).where(LlmModel.slug == model_slug, LlmModel.status == "active")
+    )
+    model = result.scalar_one_or_none()
+    if not model or not model.runpod_endpoint_id:
+        raise HTTPException(status_code=404, detail="Model not found or endpoint not configured")
+
+    await runpod_service.update_endpoint_idle_timeout(model.runpod_endpoint_id, 5)
+    return {"status": "terminated", "message": "Worker will stop within seconds"}
 
 
 @router.post("/v1/chat/completions")

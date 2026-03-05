@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, isAuthenticated } from "@/lib/auth";
-import { getMe } from "@/lib/api";
+import { getMe, terminateModel } from "@/lib/api";
 
 interface Message {
   id: string;
@@ -155,6 +155,7 @@ export default function PlaygroundPage() {
   const [workerStatus, setWorkerStatus] = useState<WorkerStatus>(null);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [terminating, setTerminating] = useState(false);
 
   // Auto-scroll refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -411,6 +412,22 @@ export default function PlaygroundPage() {
     setIsStreaming(false);
   };
 
+  const handleTerminate = async () => {
+    if (!selectedModel || terminating) return;
+    const token = getToken();
+    if (!token) return;
+    setTerminating(true);
+    try {
+      await terminateModel(token, selectedModel);
+      setWorkerStatus("sleep");
+      stopPolling();
+      startPolling(selectedModel, 5000);
+    } catch {
+      // ignore
+    }
+    setTerminating(false);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -478,6 +495,16 @@ export default function PlaygroundPage() {
           )}
           {workerStatus === "loading" && (
             <span className="text-[10px] font-mono text-surface-700">checking...</span>
+          )}
+
+          {(workerStatus === "ready" || workerStatus === "warming_up") && !isStreaming && (
+            <button
+              onClick={handleTerminate}
+              disabled={terminating}
+              className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 border text-red-400 border-red-800 bg-red-950/40 hover:bg-red-900/60 transition-colors disabled:opacity-40"
+            >
+              {terminating ? "Stopping..." : "Stop"}
+            </button>
           )}
 
           {selectedModel && (() => {

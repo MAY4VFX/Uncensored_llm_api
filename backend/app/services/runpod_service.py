@@ -113,6 +113,26 @@ async def create_endpoint(
         return ep_data
 
 
+async def update_endpoint_idle_timeout(endpoint_id: str, idle_timeout: int) -> None:
+    """Update idleTimeout of an existing RunPod Serverless Endpoint."""
+    mutation = (
+        f'mutation {{ saveEndpoint(input: {{'
+        f' id: "{endpoint_id}",'
+        f' idleTimeout: {idle_timeout}'
+        f' }}) {{ id idleTimeout }} }}'
+    )
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            RUNPOD_GRAPHQL_URL,
+            headers=_headers(),
+            json={"query": mutation},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "errors" in data:
+            raise RuntimeError(f"Endpoint update failed: {data['errors']}")
+
+
 async def delete_endpoint(endpoint_id: str) -> None:
     """Delete a RunPod Serverless Endpoint."""
     mutation = """
