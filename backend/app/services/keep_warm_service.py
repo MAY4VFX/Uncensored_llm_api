@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.keep_warm import KeepWarm
@@ -24,17 +23,26 @@ async def enable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
         raise ValueError("Insufficient credits for at least 1 hour of keep warm")
 
     now = datetime.now(timezone.utc)
-    stmt = insert(KeepWarm).values(
-        user_id=user_id,
-        model_id=model.id,
-        is_active=True,
-        activated_at=now,
-        last_billed_at=now,
-    ).on_conflict_do_update(
-        index_elements=["user_id", "model_id"],
-        set_=dict(is_active=True, activated_at=now, last_billed_at=now),
+
+    # Check if record exists (dialect-agnostic upsert)
+    existing = await db.execute(
+        select(KeepWarm).where(KeepWarm.user_id == user_id, KeepWarm.model_id == model.id)
     )
-    await db.execute(stmt)
+    record = existing.scalar_one_or_none()
+    if record:
+        await db.execute(
+            update(KeepWarm)
+            .where(KeepWarm.user_id == user_id, KeepWarm.model_id == model.id)
+            .values(is_active=True, activated_at=now, last_billed_at=now)
+        )
+    else:
+        db.add(KeepWarm(
+            user_id=user_id,
+            model_id=model.id,
+            is_active=True,
+            activated_at=now,
+            last_billed_at=now,
+        ))
     await db.commit()
 
     if model.runpod_endpoint_id:
