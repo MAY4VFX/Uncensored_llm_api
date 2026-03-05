@@ -60,7 +60,7 @@ def estimate_max_cost(
 async def log_usage(
     db: AsyncSession,
     user_id: uuid.UUID,
-    api_key_id: uuid.UUID,
+    api_key_id: uuid.UUID | None,
     model_id: uuid.UUID,
     tokens_in: int,
     tokens_out: int,
