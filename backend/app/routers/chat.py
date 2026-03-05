@@ -102,16 +102,22 @@ async def chat_completions(
 
     # 2b. Validate max_tokens against model context limit
     max_ctx = model.max_context_length or 4096
-    if request.max_tokens and request.max_tokens > max_ctx:
-        request.max_tokens = max_ctx
 
     # 3. Estimate cost and check credits
     tokens_in_estimate = count_message_tokens(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
+
+    # Cap max_tokens so prompt + completion fits within context window
+    max_possible_output = max(1, max_ctx - tokens_in_estimate)
+    if request.max_tokens:
+        request.max_tokens = min(request.max_tokens, max_possible_output)
+    else:
+        request.max_tokens = max_possible_output
+
     estimated_cost = calculate_cost(
         tokens_in_estimate,
-        request.max_tokens or max_ctx,
+        request.max_tokens,
         float(model.cost_per_1m_input),
         float(model.cost_per_1m_output),
     )

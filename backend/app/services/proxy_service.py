@@ -41,7 +41,7 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
             "model": model.hf_repo,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
             "temperature": request.temperature,
-            "max_tokens": request.max_tokens or (model.max_context_length or 32768),
+            "max_tokens": request.max_tokens or 4096,
             "top_p": request.top_p,
             "stream": stream,
             "stop": request.stop,
