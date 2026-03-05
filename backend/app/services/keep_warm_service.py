@@ -65,7 +65,10 @@ async def enable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
     await db.commit()
 
     if model.runpod_endpoint_id:
-        await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 1)
+        try:
+            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 1)
+        except Exception as e:
+            logger.error(f"Failed to set workersMin=1 for {model.slug}: {e}")
 
     return {"status": "enabled", "price_per_hour": price}
 
@@ -87,7 +90,10 @@ async def disable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict
     active_count = result.scalar()
 
     if active_count == 0 and model.runpod_endpoint_id:
-        await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 0)
+        try:
+            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 0)
+        except Exception as e:
+            logger.error(f"Failed to set workersMin=0 for {model.slug}: {e}")
 
     return {"status": "disabled"}
 
