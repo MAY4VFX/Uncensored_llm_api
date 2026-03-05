@@ -9,10 +9,12 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  window.dispatchEvent(new Event("unchained_token_changed"));
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  window.dispatchEvent(new Event("unchained_token_changed"));
 }
 
 export function isAuthenticated(): boolean {

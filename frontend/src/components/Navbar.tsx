@@ -11,12 +11,33 @@ export default function Navbar() {
   const [user, setUser] = useState<{ email: string; is_admin: boolean } | null>(null);
 
   useEffect(() => {
-    const token = getToken();
-    if (token) {
-      getMe(token)
-        .then(setUser)
-        .catch(() => clearToken());
-    }
+    const loadUser = () => {
+      const token = getToken();
+      if (token) {
+        getMe(token)
+          .then(setUser)
+          .catch(() => { clearToken(); setUser(null); });
+      } else {
+        setUser(null);
+      }
+    };
+
+    loadUser();
+
+    // Re-check when token changes in localStorage (login/logout from other tabs or same tab)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "unchained_token") loadUser();
+    };
+    window.addEventListener("storage", onStorage);
+
+    // Custom event for same-tab token changes
+    const onTokenChange = () => loadUser();
+    window.addEventListener("unchained_token_changed", onTokenChange);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("unchained_token_changed", onTokenChange);
+    };
   }, []);
 
   const handleLogout = () => {
