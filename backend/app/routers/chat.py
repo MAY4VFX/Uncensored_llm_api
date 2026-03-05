@@ -57,9 +57,9 @@ async def warm_model(
     if not model or not model.runpod_endpoint_id:
         raise HTTPException(status_code=404, detail="Model not found or endpoint not configured")
 
-    # Restore idle timeout to default (30s) in case it was reduced by /terminate
+    # Restore idle timeout to default (300s) in case it was reduced by /terminate
     try:
-        await runpod_service.update_endpoint_idle_timeout(model.runpod_endpoint_id, 30)
+        await runpod_service.update_endpoint_idle_timeout(model.runpod_endpoint_id, 300)
     except Exception:
         pass  # Non-critical
 
