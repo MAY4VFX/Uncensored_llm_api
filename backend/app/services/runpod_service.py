@@ -122,15 +122,33 @@ async def create_endpoint(
         return ep_data
 
 
+async def _get_endpoint_config(client: httpx.AsyncClient, endpoint_id: str) -> dict:
+    """Fetch current endpoint config to preserve fields in saveEndpoint mutations."""
+    query = 'query { myself { endpoints { id name gpuIds workersMin workersMax idleTimeout } } }'
+    resp = await client.post(RUNPOD_GRAPHQL_URL, headers=_headers(), json={"query": query})
+    resp.raise_for_status()
+    data = resp.json()
+    endpoints = data.get("data", {}).get("myself", {}).get("endpoints", [])
+    for ep in endpoints:
+        if ep.get("id") == endpoint_id:
+            return ep
+    return {"name": endpoint_id, "gpuIds": "AMPERE_48", "workersMin": 0, "workersMax": 1, "idleTimeout": 30}
+
+
 async def update_endpoint_idle_timeout(endpoint_id: str, idle_timeout: int) -> None:
     """Update idleTimeout of an existing RunPod Serverless Endpoint."""
-    mutation = (
-        f'mutation {{ saveEndpoint(input: {{'
-        f' id: "{endpoint_id}",'
-        f' idleTimeout: {idle_timeout}'
-        f' }}) {{ id idleTimeout }} }}'
-    )
     async with httpx.AsyncClient(timeout=30) as client:
+        ep = await _get_endpoint_config(client, endpoint_id)
+        mutation = (
+            f'mutation {{ saveEndpoint(input: {{'
+            f' id: "{endpoint_id}",'
+            f' name: "{ep["name"]}",'
+            f' gpuIds: "{ep["gpuIds"]}",'
+            f' workersMin: {ep.get("workersMin", 0)},'
+            f' workersMax: {ep.get("workersMax", 1)},'
+            f' idleTimeout: {idle_timeout}'
+            f' }}) {{ id idleTimeout }} }}'
+        )
         resp = await client.post(
             RUNPOD_GRAPHQL_URL,
             headers=_headers(),
@@ -143,45 +161,19 @@ async def update_endpoint_idle_timeout(endpoint_id: str, idle_timeout: int) -> N
 
 
 async def update_endpoint_workers_min(endpoint_id: str, workers_min: int) -> None:
-    """Update workersMin of an existing RunPod Serverless Endpoint.
-
-    RunPod's saveEndpoint requires 'name' even for updates,
-    so we first query the endpoint name, then update.
-    """
-    # First get current endpoint config (saveEndpoint resets fields not included)
-    query = 'query { myself { endpoints { id name gpuIds workersMin workersMax idleTimeout } } }'
+    """Update workersMin of an existing RunPod Serverless Endpoint."""
     async with httpx.AsyncClient(timeout=30) as client:
-        q_resp = await client.post(
-            RUNPOD_GRAPHQL_URL,
-            headers=_headers(),
-            json={"query": query},
-        )
-        q_resp.raise_for_status()
-        q_data = q_resp.json()
-        endpoints = q_data.get("data", {}).get("myself", {}).get("endpoints", [])
-        ep_name = endpoint_id
-        ep_gpu_ids = "AMPERE_48"
-        ep_workers_max = 1
-        ep_idle_timeout = 30
-        for ep in endpoints:
-            if ep.get("id") == endpoint_id:
-                ep_name = ep.get("name", endpoint_id)
-                ep_gpu_ids = ep.get("gpuIds", "AMPERE_48")
-                ep_workers_max = ep.get("workersMax", 1)
-                ep_idle_timeout = ep.get("idleTimeout", 30)
-                break
-
-        # Ensure workersMax >= workersMin
-        workers_max = max(ep_workers_max, workers_min)
+        ep = await _get_endpoint_config(client, endpoint_id)
+        workers_max = max(ep.get("workersMax", 1), workers_min)
 
         mutation = (
             f'mutation {{ saveEndpoint(input: {{'
             f' id: "{endpoint_id}",'
-            f' name: "{ep_name}",'
-            f' gpuIds: "{ep_gpu_ids}",'
+            f' name: "{ep["name"]}",'
+            f' gpuIds: "{ep["gpuIds"]}",'
             f' workersMin: {workers_min},'
             f' workersMax: {workers_max},'
-            f' idleTimeout: {ep_idle_timeout}'
+            f' idleTimeout: {ep.get("idleTimeout", 30)}'
             f' }}) {{ id workersMin workersMax }} }}'
         )
         resp = await client.post(
