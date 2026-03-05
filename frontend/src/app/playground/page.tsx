@@ -203,10 +203,24 @@ export default function PlaygroundPage() {
       .then((r) => r.json())
       .then((data) => {
         const s = data.status as string;
-        const mapped: WorkerStatus = s === "cold" ? "sleep" : (s as WorkerStatus);
+        const workersReady = data.workers_ready || 0;
+        const throttled = data.throttled || 0;
+
+        // Map backend status to UI status based on actual worker state
+        let mapped: WorkerStatus;
+        if (workersReady > 0) {
+          mapped = "ready";
+        } else if (s === "warming_up" || s === "initializing") {
+          mapped = "warming_up";
+        } else if (s === "throttled" || throttled > 0) {
+          mapped = "throttled";
+        } else if (s === "cold" || s === "unknown") {
+          mapped = "sleep";
+        } else {
+          mapped = s as WorkerStatus;
+        }
 
         if (mapped === "sleep") {
-          // Debounce: require 2 consecutive cold readings to prevent flicker
           coldCountRef.current += 1;
           if (coldCountRef.current >= 2) {
             setWorkerStatus("sleep");
@@ -290,7 +304,21 @@ export default function PlaygroundPage() {
       .then((r) => r.json())
       .then((data) => {
         const s = data.status as string;
-        const mapped: WorkerStatus = s === "cold" ? "sleep" : (s as WorkerStatus);
+        const workersReady = data.workers_ready || 0;
+        const throttled = data.throttled || 0;
+
+        let mapped: WorkerStatus;
+        if (workersReady > 0) {
+          mapped = "ready";
+        } else if (s === "warming_up" || s === "initializing") {
+          mapped = "warming_up";
+        } else if (s === "throttled" || throttled > 0) {
+          mapped = "throttled";
+        } else if (s === "cold" || s === "unknown") {
+          mapped = "sleep";
+        } else {
+          mapped = s as WorkerStatus;
+        }
         setWorkerStatus(mapped);
 
         if (mapped === "sleep") {

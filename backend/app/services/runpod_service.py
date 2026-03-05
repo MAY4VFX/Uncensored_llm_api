@@ -215,21 +215,27 @@ async def check_worker_status(endpoint_id: str) -> dict:
         health = await get_endpoint_health(endpoint_id)
         workers = health.get("workers", {}) if isinstance(health.get("workers"), dict) else {}
         workers_ready = workers.get("ready", 0)
+        workers_idle = workers.get("idle", 0)
         workers_running = workers.get("running", 0)
         initializing = workers.get("initializing", 0)
         throttled = workers.get("throttled", 0)
 
+        # "ready" in RunPod health = idle workers that can accept jobs
+        # "running" = actively processing (still available for queue)
         total_active = workers_ready + workers_running
         if total_active > 0:
-            return {"ready": True, "workers_ready": total_active, "initializing": initializing, "status": "ready", "estimated_wait": 0}
+            # Workers exist and can handle requests — but warn if some are throttled
+            return {"ready": True, "workers_ready": total_active, "initializing": initializing, "throttled": throttled, "status": "ready", "estimated_wait": 0}
         elif initializing > 0:
-            return {"ready": False, "workers_ready": 0, "initializing": initializing, "status": "warming_up", "estimated_wait": 120}
+            return {"ready": False, "workers_ready": 0, "initializing": initializing, "throttled": throttled, "status": "warming_up", "estimated_wait": 120}
         elif throttled > 0:
-            return {"ready": False, "workers_ready": 0, "initializing": 0, "status": "throttled", "estimated_wait": 300}
+            # All workers throttled — GPU unavailable, will take a while
+            return {"ready": False, "workers_ready": 0, "initializing": 0, "throttled": throttled, "status": "throttled", "estimated_wait": 300}
         else:
-            return {"ready": False, "workers_ready": 0, "initializing": 0, "status": "cold", "estimated_wait": 180}
+            return {"ready": False, "workers_ready": 0, "initializing": 0, "throttled": 0, "status": "cold", "estimated_wait": 180}
     except Exception:
-        return {"ready": True, "workers_ready": 0, "initializing": 0, "status": "unknown", "estimated_wait": 0}
+        # On error, assume cold — don't mislead user with "ready"
+        return {"ready": False, "workers_ready": 0, "initializing": 0, "throttled": 0, "status": "unknown", "estimated_wait": 60}
 
 
 async def run_inference(endpoint_id: str, payload: dict) -> dict:

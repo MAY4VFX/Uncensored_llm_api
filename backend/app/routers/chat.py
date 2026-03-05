@@ -39,6 +39,7 @@ async def model_status(
         "status": worker["status"],
         "estimated_wait_seconds": worker["estimated_wait"],
         "workers_ready": worker["workers_ready"],
+        "throttled": worker.get("throttled", 0),
     }
 
 
