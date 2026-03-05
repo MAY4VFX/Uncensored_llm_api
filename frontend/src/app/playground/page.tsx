@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, isAuthenticated } from "@/lib/auth";
-import { getMe, terminateModel } from "@/lib/api";
+import { getMe, terminateModel, getKeepWarm, enableKeepWarm, disableKeepWarm } from "@/lib/api";
 
 interface Message {
   id: string;
@@ -156,6 +156,9 @@ export default function PlaygroundPage() {
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [terminating, setTerminating] = useState(false);
+  const [keepWarm, setKeepWarm] = useState(false);
+  const [keepWarmPrice, setKeepWarmPrice] = useState<number | null>(null);
+  const [keepWarmLoading, setKeepWarmLoading] = useState(false);
 
   // Auto-scroll refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -249,6 +252,27 @@ export default function PlaygroundPage() {
       })
       .catch(() => {});
   }, [router, API_URL]);
+
+  // --- Fetch keep warm status on model change ---
+  useEffect(() => {
+    if (!selectedModel) {
+      setKeepWarm(false);
+      setKeepWarmPrice(null);
+      return;
+    }
+    const token = getToken();
+    if (token) {
+      getKeepWarm(token, selectedModel)
+        .then((data) => {
+          setKeepWarm(data.is_active);
+          setKeepWarmPrice(data.price_per_hour);
+        })
+        .catch(() => {
+          setKeepWarm(false);
+          setKeepWarmPrice(null);
+        });
+    }
+  }, [selectedModel]);
 
   // --- Check status + pre-warm on model change ---
   useEffect(() => {
@@ -428,6 +452,27 @@ export default function PlaygroundPage() {
     setTerminating(false);
   };
 
+  const handleKeepWarmToggle = async () => {
+    if (!selectedModel || keepWarmLoading) return;
+    const token = getToken();
+    if (!token) return;
+    setKeepWarmLoading(true);
+    try {
+      if (keepWarm) {
+        await disableKeepWarm(token, selectedModel);
+        setKeepWarm(false);
+      } else {
+        const data = await enableKeepWarm(token, selectedModel);
+        setKeepWarm(true);
+        setKeepWarmPrice(data.price_per_hour);
+      }
+      getMe(token).then(setUser);
+    } catch (err: any) {
+      setError(err.message);
+    }
+    setKeepWarmLoading(false);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -504,6 +549,20 @@ export default function PlaygroundPage() {
               className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 border text-red-400 border-red-800 bg-red-950/40 hover:bg-red-900/60 transition-colors disabled:opacity-40"
             >
               {terminating ? "Stopping..." : "Stop"}
+            </button>
+          )}
+
+          {selectedModel && keepWarmPrice !== null && keepWarmPrice > 0 && (
+            <button
+              onClick={handleKeepWarmToggle}
+              disabled={keepWarmLoading}
+              className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 border transition-colors disabled:opacity-40 ${
+                keepWarm
+                  ? "text-orange-400 border-orange-800 bg-orange-950/40 hover:bg-orange-900/60"
+                  : "text-surface-600 border-surface-400 hover:text-orange-400 hover:border-orange-800"
+              }`}
+            >
+              {keepWarmLoading ? "..." : keepWarm ? `Warm $${keepWarmPrice.toFixed(2)}/hr` : `Keep Warm $${keepWarmPrice.toFixed(2)}/hr`}
             </button>
           )}
 

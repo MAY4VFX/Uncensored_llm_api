@@ -1,15 +1,32 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine
-from app.routers import admin, api_keys, auth, billing, chat, models, playground, usage
+from app.database import async_session, engine
+from app.routers import admin, api_keys, auth, billing, chat, keep_warm, models, playground, usage
+from app.services.keep_warm_service import tick_billing
+
+logger = logging.getLogger(__name__)
+
+
+async def _keep_warm_ticker():
+    while True:
+        await asyncio.sleep(60)
+        try:
+            async with async_session() as db:
+                await tick_billing(db)
+        except Exception:
+            logger.exception("keep_warm ticker error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_keep_warm_ticker())
     yield
+    task.cancel()
     await engine.dispose()
 
 
@@ -37,6 +54,7 @@ app.include_router(usage.router)
 app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(playground.router)
+app.include_router(keep_warm.router)
 
 
 @app.get("/health")
