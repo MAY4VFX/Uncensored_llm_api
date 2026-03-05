@@ -583,7 +583,7 @@ export default function PlaygroundPage() {
             <span className="text-[10px] font-mono text-surface-700">checking...</span>
           )}
 
-          {(workerStatus === "ready" || workerStatus === "idle" || workerStatus === "warming_up") && !isStreaming && (
+          {workerStatus === "ready" && !isStreaming && (
             <button
               onClick={handleTerminate}
               disabled={terminating}
