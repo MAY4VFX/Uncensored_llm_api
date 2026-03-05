@@ -39,7 +39,7 @@ GPU_HOURLY_COST = {
 async def create_endpoint(
     name: str,
     gpu_type: str,
-    docker_image: str = "runpod/worker-v1-vllm:v2.7.0stable-cuda12.1.0",
+    docker_image: str = "runpod/worker-v1-vllm:v2.8.0stable-cuda12.1.0",
     model_name: str = "",
     max_workers: int = 1,
     idle_timeout: int = 30,
