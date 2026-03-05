@@ -26,6 +26,15 @@ GPU_ID_MAP = {
     "A100_80GB": "AMPERE_80,ADA_80_PRO,HOPPER_141",
 }
 
+# RunPod serverless GPU hourly cost (USD) — used for keep warm pricing
+GPU_HOURLY_COST = {
+    "RTX_4000_Ada_20GB": 0.58,
+    "RTX_A4500_20GB": 0.58,
+    "RTX_A5000_24GB": 0.74,
+    "A100_40GB": 1.12,
+    "A100_80GB": 1.58,
+}
+
 
 async def create_endpoint(
     name: str,
