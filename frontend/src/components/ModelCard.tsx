@@ -5,6 +5,7 @@ interface ModelCardProps {
   paramsB: number;
   quantization: string;
   gpuType: string;
+  gpuCount?: number;
   status: string;
   costInput: number;
   costOutput: number;
@@ -28,6 +29,7 @@ export default function ModelCard({
   paramsB,
   quantization,
   gpuType,
+  gpuCount = 1,
   status,
   costInput,
   costOutput,
@@ -55,7 +57,7 @@ export default function ModelCard({
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
-        {[`${paramsB}B`, quantization, gpuType].map((tag) => (
+        {[`${paramsB}B`, quantization, gpuCount > 1 ? `${gpuCount}x ${gpuType}` : gpuType].map((tag) => (
           <span key={tag} className="text-[10px] font-mono text-surface-800 border border-surface-400 px-2 py-0.5 uppercase">
             {tag}
           </span>

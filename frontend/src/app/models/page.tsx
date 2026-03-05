@@ -13,6 +13,7 @@ interface Model {
   params_b: number;
   quantization: string;
   gpu_type: string;
+  gpu_count: number;
   status: string;
   cost_per_1m_input: number;
   cost_per_1m_output: number;
@@ -46,6 +47,7 @@ export default function ModelsPage() {
               params_b: 0,
               quantization: "",
               gpu_type: "",
+              gpu_count: 1,
               status: "active",
               cost_per_1m_input: 0,
               cost_per_1m_output: 0,
@@ -119,6 +121,7 @@ export default function ModelsPage() {
               paramsB={m.params_b}
               quantization={m.quantization}
               gpuType={m.gpu_type}
+              gpuCount={m.gpu_count}
               status={m.status}
               costInput={m.cost_per_1m_input}
               costOutput={m.cost_per_1m_output}

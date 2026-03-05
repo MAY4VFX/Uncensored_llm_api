@@ -18,6 +18,7 @@ class LlmModel(Base):
     params_b: Mapped[float] = mapped_column(Float, nullable=False)
     quantization: Mapped[str] = mapped_column(String(10), nullable=False, default="Q4")
     gpu_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    gpu_count: Mapped[int] = mapped_column(nullable=False, default=1)
     runpod_endpoint_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(
         Enum("pending", "deploying", "active", "inactive", name="model_status"),

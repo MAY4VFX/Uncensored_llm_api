@@ -19,18 +19,26 @@ GPU_MATRIX = {
     "RTX_A5000_24GB": 24,
     "A100_40GB": 40,
     "A100_80GB": 80,
+    "H100_80GB": 80,
+    "H200_141GB": 141,
 }
 
 QUANT_MULTIPLIERS = {"Q4": 0.5, "Q8": 1.0, "FP16": 2.0}
 
 
-def select_gpu(params_b: float, quant: str) -> str:
+def select_gpu(params_b: float, quant: str) -> tuple[str, int]:
+    """Select GPU type and count. Returns (gpu_type, gpu_count)."""
     multiplier = QUANT_MULTIPLIERS.get(quant, 1.0)
     vram_needed = params_b * multiplier * 1.3
     for gpu_name, vram in GPU_MATRIX.items():
         if vram_needed <= vram:
-            return gpu_name
-    return "A100_80GB"
+            return gpu_name, 1
+    # Need multi-GPU — use largest GPU type
+    best_gpu = "H200_141GB"
+    best_vram = GPU_MATRIX[best_gpu]
+    gpu_count = max(1, -(-int(vram_needed) // best_vram))  # ceil division
+    gpu_count = min(gpu_count, 8)  # RunPod max 8 GPUs
+    return best_gpu, gpu_count
 
 
 @router.get("/models", response_model=list[ModelResponse])
@@ -64,7 +72,7 @@ async def create_model(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Model slug already exists")
 
-    gpu_type = select_gpu(request.params_b, request.quantization)
+    gpu_type, gpu_count = select_gpu(request.params_b, request.quantization)
     model = LlmModel(
         slug=request.slug,
         display_name=request.display_name,
@@ -72,6 +80,7 @@ async def create_model(
         params_b=request.params_b,
         quantization=request.quantization,
         gpu_type=gpu_type,
+        gpu_count=gpu_count,
         cost_per_1m_input=request.cost_per_1m_input,
         cost_per_1m_output=request.cost_per_1m_output,
         description=request.description,
@@ -106,6 +115,7 @@ async def deploy_model(
             model_name=model.hf_repo,
             params_b=float(model.params_b or 0),
             max_model_len=model.max_context_length or 4096,
+            gpu_count=model.gpu_count or 1,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
         model.runpod_endpoint_id = endpoint_data.get("id")

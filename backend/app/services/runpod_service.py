@@ -24,15 +24,19 @@ GPU_ID_MAP = {
     "RTX_A5000_24GB": "ADA_24,AMPERE_24",
     "A100_40GB": "AMPERE_48,ADA_48_PRO",
     "A100_80GB": "AMPERE_80,ADA_80_PRO,HOPPER_141",
+    "H100_80GB": "HOPPER_80",
+    "H200_141GB": "HOPPER_141",
 }
 
-# RunPod serverless GPU hourly cost (USD) — used for keep warm pricing
+# RunPod serverless GPU hourly cost (USD per GPU) — used for keep warm pricing
 GPU_HOURLY_COST = {
     "RTX_4000_Ada_20GB": 0.58,
     "RTX_A4500_20GB": 0.58,
     "RTX_A5000_24GB": 0.74,
     "A100_40GB": 1.12,
     "A100_80GB": 1.58,
+    "H100_80GB": 2.49,
+    "H200_141GB": 3.29,
 }
 
 
@@ -45,6 +49,7 @@ async def create_endpoint(
     idle_timeout: int = 30,
     params_b: float = 0,
     max_model_len: int = 4096,
+    gpu_count: int = 1,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
     env_vars = [
@@ -98,11 +103,13 @@ async def create_endpoint(
         # Step 2: Create endpoint with template
         runpod_gpu = GPU_ID_MAP.get(gpu_type, "AMPERE_48")
         ep_name = name[:50]
+        gpu_count_field = f' gpuCount: {gpu_count},' if gpu_count > 1 else ''
         ep_query = (
             f'mutation {{ saveEndpoint(input: {{'
             f' name: "{ep_name}",'
             f' templateId: "{template_id}",'
             f' gpuIds: "{runpod_gpu}",'
+            f'{gpu_count_field}'
             f' workersMin: 0,'
             f' workersMax: {max_workers},'
             f' idleTimeout: {idle_timeout},'
@@ -124,7 +131,7 @@ async def create_endpoint(
 
 async def _get_endpoint_config(client: httpx.AsyncClient, endpoint_id: str) -> dict:
     """Fetch current endpoint config to preserve fields in saveEndpoint mutations."""
-    query = 'query { myself { endpoints { id name gpuIds workersMin workersMax idleTimeout } } }'
+    query = 'query { myself { endpoints { id name gpuIds gpuCount workersMin workersMax idleTimeout } } }'
     resp = await client.post(RUNPOD_GRAPHQL_URL, headers=_headers(), json={"query": query})
     resp.raise_for_status()
     data = resp.json()
@@ -132,18 +139,20 @@ async def _get_endpoint_config(client: httpx.AsyncClient, endpoint_id: str) -> d
     for ep in endpoints:
         if ep.get("id") == endpoint_id:
             return ep
-    return {"name": endpoint_id, "gpuIds": "AMPERE_48", "workersMin": 0, "workersMax": 1, "idleTimeout": 30}
+    return {"name": endpoint_id, "gpuIds": "AMPERE_48", "gpuCount": 1, "workersMin": 0, "workersMax": 1, "idleTimeout": 30}
 
 
 async def update_endpoint_idle_timeout(endpoint_id: str, idle_timeout: int) -> None:
     """Update idleTimeout of an existing RunPod Serverless Endpoint."""
     async with httpx.AsyncClient(timeout=30) as client:
         ep = await _get_endpoint_config(client, endpoint_id)
+        gpu_count_field = f' gpuCount: {ep["gpuCount"]},' if ep.get("gpuCount", 1) > 1 else ''
         mutation = (
             f'mutation {{ saveEndpoint(input: {{'
             f' id: "{endpoint_id}",'
             f' name: "{ep["name"]}",'
             f' gpuIds: "{ep["gpuIds"]}",'
+            f'{gpu_count_field}'
             f' workersMin: {ep.get("workersMin", 0)},'
             f' workersMax: {ep.get("workersMax", 1)},'
             f' idleTimeout: {idle_timeout}'
@@ -166,11 +175,13 @@ async def update_endpoint_workers_min(endpoint_id: str, workers_min: int) -> Non
         ep = await _get_endpoint_config(client, endpoint_id)
         workers_max = max(ep.get("workersMax", 1), workers_min)
 
+        gpu_count_field = f' gpuCount: {ep["gpuCount"]},' if ep.get("gpuCount", 1) > 1 else ''
         mutation = (
             f'mutation {{ saveEndpoint(input: {{'
             f' id: "{endpoint_id}",'
             f' name: "{ep["name"]}",'
             f' gpuIds: "{ep["gpuIds"]}",'
+            f'{gpu_count_field}'
             f' workersMin: {workers_min},'
             f' workersMax: {workers_max},'
             f' idleTimeout: {ep.get("idleTimeout", 30)}'
