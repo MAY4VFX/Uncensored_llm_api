@@ -159,6 +159,7 @@ export default function PlaygroundPage() {
   const [keepWarm, setKeepWarm] = useState(false);
   const [keepWarmPrice, setKeepWarmPrice] = useState<number | null>(null);
   const [keepWarmLoading, setKeepWarmLoading] = useState(false);
+  const [warmWorkers, setWarmWorkers] = useState(0);
 
   // Auto-scroll refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -258,6 +259,7 @@ export default function PlaygroundPage() {
     if (!selectedModel) {
       setKeepWarm(false);
       setKeepWarmPrice(null);
+      setWarmWorkers(0);
       return;
     }
     const token = getToken();
@@ -266,10 +268,12 @@ export default function PlaygroundPage() {
         .then((data) => {
           setKeepWarm(data.is_active);
           setKeepWarmPrice(data.price_per_hour);
+          setWarmWorkers(data.warm_workers);
         })
         .catch(() => {
           setKeepWarm(false);
           setKeepWarmPrice(null);
+          setWarmWorkers(0);
         });
     }
   }, [selectedModel]);
@@ -459,12 +463,14 @@ export default function PlaygroundPage() {
     setKeepWarmLoading(true);
     try {
       if (keepWarm) {
-        await disableKeepWarm(token, selectedModel);
+        const data = await disableKeepWarm(token, selectedModel);
         setKeepWarm(false);
+        setWarmWorkers(data.warm_workers);
       } else {
         const data = await enableKeepWarm(token, selectedModel);
         setKeepWarm(true);
         setKeepWarmPrice(data.price_per_hour);
+        setWarmWorkers(data.warm_workers);
       }
       getMe(token).then(setUser);
     } catch (err: any) {
@@ -562,7 +568,7 @@ export default function PlaygroundPage() {
                   : "text-surface-600 border-surface-400 hover:text-orange-400 hover:border-orange-800"
               }`}
             >
-              {keepWarmLoading ? "..." : keepWarm ? `Warm $${keepWarmPrice.toFixed(2)}/hr` : `Keep Warm $${keepWarmPrice.toFixed(2)}/hr`}
+              {keepWarmLoading ? "..." : keepWarm ? `Warm ${warmWorkers}w $${keepWarmPrice.toFixed(2)}/hr` : `Keep Warm $${keepWarmPrice.toFixed(2)}/hr${warmWorkers > 0 ? ` (${warmWorkers}w)` : ""}`}
             </button>
           )}
 

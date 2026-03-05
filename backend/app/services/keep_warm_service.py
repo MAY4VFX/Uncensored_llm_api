@@ -32,6 +32,27 @@ def get_keep_warm_price(model: LlmModel) -> float:
     return round(gpu_cost * KEEP_WARM_MARGIN, 4)
 
 
+async def _sync_workers_min(db: AsyncSession, model: LlmModel) -> int:
+    """Count active keep_warm subscriptions and set workersMin accordingly.
+
+    Each active subscription = 1 warm worker. Returns the new count.
+    """
+    result = await db.execute(
+        select(func.count()).select_from(KeepWarm).where(
+            KeepWarm.model_id == model.id, KeepWarm.is_active == True
+        )
+    )
+    active_count = result.scalar() or 0
+
+    if model.runpod_endpoint_id:
+        try:
+            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, active_count)
+        except Exception as e:
+            logger.error(f"Failed to set workersMin={active_count} for {model.slug}: {e}")
+
+    return active_count
+
+
 async def enable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
     price = get_keep_warm_price(model)
     if price <= 0:
@@ -49,6 +70,8 @@ async def enable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
     )
     record = existing.scalar_one_or_none()
     if record:
+        if record.is_active:
+            return {"status": "already_enabled", "price_per_hour": price}
         await db.execute(
             update(KeepWarm)
             .where(KeepWarm.user_id == user_id, KeepWarm.model_id == model.id)
@@ -64,13 +87,9 @@ async def enable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
         ))
     await db.commit()
 
-    if model.runpod_endpoint_id:
-        try:
-            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 1)
-        except Exception as e:
-            logger.error(f"Failed to set workersMin=1 for {model.slug}: {e}")
+    workers = await _sync_workers_min(db, model)
 
-    return {"status": "enabled", "price_per_hour": price}
+    return {"status": "enabled", "price_per_hour": price, "warm_workers": workers}
 
 
 async def disable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
@@ -81,21 +100,9 @@ async def disable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict
     )
     await db.commit()
 
-    # Check if anyone else is keeping this model warm
-    result = await db.execute(
-        select(func.count()).select_from(KeepWarm).where(
-            KeepWarm.model_id == model.id, KeepWarm.is_active == True
-        )
-    )
-    active_count = result.scalar()
+    workers = await _sync_workers_min(db, model)
 
-    if active_count == 0 and model.runpod_endpoint_id:
-        try:
-            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 0)
-        except Exception as e:
-            logger.error(f"Failed to set workersMin=0 for {model.slug}: {e}")
-
-    return {"status": "disabled"}
+    return {"status": "disabled", "warm_workers": workers}
 
 
 async def get_status(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
@@ -107,10 +114,20 @@ async def get_status(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> d
         )
     )
     record = result.scalar_one_or_none()
+
+    # Total warm workers for this model
+    count_result = await db.execute(
+        select(func.count()).select_from(KeepWarm).where(
+            KeepWarm.model_id == model.id, KeepWarm.is_active == True
+        )
+    )
+    warm_workers = count_result.scalar() or 0
+
     return {
         "is_active": record is not None,
         "price_per_hour": get_keep_warm_price(model),
         "activated_at": record.activated_at.isoformat() if record else None,
+        "warm_workers": warm_workers,
     }
 
 
@@ -154,20 +171,11 @@ async def tick_billing(db: AsyncSession) -> None:
             models_to_check.add(model.id)
             logger.info(f"Keep warm disabled for user {kw.user_id} model {model.slug}: insufficient credits")
 
-    # For models where someone was deactivated, check if anyone else is still active
+    # For models where someone was deactivated, recalculate workersMin
     for model_id in models_to_check:
-        count_result = await db.execute(
-            select(func.count()).select_from(KeepWarm).where(
-                KeepWarm.model_id == model_id, KeepWarm.is_active == True
-            )
+        model_result = await db.execute(
+            select(LlmModel).where(LlmModel.id == model_id)
         )
-        if count_result.scalar() == 0:
-            model_result = await db.execute(
-                select(LlmModel).where(LlmModel.id == model_id)
-            )
-            model = model_result.scalar_one_or_none()
-            if model and model.runpod_endpoint_id:
-                try:
-                    await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, 0)
-                except Exception as e:
-                    logger.error(f"Failed to set workersMin=0 for {model.slug}: {e}")
+        model = model_result.scalar_one_or_none()
+        if model:
+            await _sync_workers_min(db, model)

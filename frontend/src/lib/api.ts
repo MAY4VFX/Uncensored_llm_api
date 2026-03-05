@@ -117,19 +117,19 @@ export const terminateModel = (token: string, modelSlug: string) =>
 
 // Keep Warm
 export const getKeepWarm = (token: string, modelSlug: string) =>
-  apiFetch<{ is_active: boolean; price_per_hour: number; activated_at: string | null }>(
+  apiFetch<{ is_active: boolean; price_per_hour: number; activated_at: string | null; warm_workers: number }>(
     `/v1/models/${modelSlug}/keep-warm`,
     { token }
   );
 
 export const enableKeepWarm = (token: string, modelSlug: string) =>
-  apiFetch<{ status: string; price_per_hour: number }>(`/v1/models/${modelSlug}/keep-warm`, {
+  apiFetch<{ status: string; price_per_hour: number; warm_workers: number }>(`/v1/models/${modelSlug}/keep-warm`, {
     method: "POST",
     token,
   });
 
 export const disableKeepWarm = (token: string, modelSlug: string) =>
-  apiFetch<{ status: string }>(`/v1/models/${modelSlug}/keep-warm`, {
+  apiFetch<{ status: string; warm_workers: number }>(`/v1/models/${modelSlug}/keep-warm`, {
     method: "DELETE",
     token,
   });
