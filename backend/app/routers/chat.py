@@ -192,12 +192,21 @@ async def _stream_and_track(
     db: AsyncSession,
 ):
     """Stream response and track usage after completion."""
-    total_output_tokens = 0
+    full_output = []
     async for chunk in proxy_service.proxy_chat_completion_stream(request, model):
-        # Rough token count for streaming
-        if "content" in chunk and chunk != "data: [DONE]\n\n":
-            total_output_tokens += 1
+        # Collect content for accurate token counting
+        if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+            try:
+                import json as _json
+                data = _json.loads(chunk[6:])
+                content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                if content:
+                    full_output.append(content)
+            except (ValueError, IndexError, KeyError):
+                pass
         yield chunk
+
+    total_output_tokens = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}]) if full_output else 0
 
     # Track usage after stream completes
     tokens_in = count_message_tokens(
