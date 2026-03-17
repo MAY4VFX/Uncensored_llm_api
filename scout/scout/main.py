@@ -8,7 +8,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 from scout.analyzer import analyze_model_card, fetch_model_card
 from scout.config import settings
-from scout.db import get_session, insert_model, model_exists, update_model_status
+from scout.db import get_session, insert_model, model_exists, update_hf_stats, update_model_status
 from scout.deployer import deploy_endpoint
 from scout.gpu_selector import estimate_cost_per_1m_tokens, select_gpu
 from scout.hf_client import (
@@ -53,8 +53,11 @@ async def scout_run():
         for m in filtered:
             hf_repo = m.get("id", "")
 
-            # Skip if already in our DB
+            # Update HF stats for existing models
             if model_exists(session, hf_repo):
+                downloads = m.get("downloads", 0)
+                likes = m.get("likes", 0)
+                update_hf_stats(session, hf_repo, downloads, likes)
                 continue
 
             # Extract metadata

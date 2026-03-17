@@ -60,3 +60,11 @@ def update_model_status(session: Session, model_id, status: str, endpoint_id: st
         if endpoint_id:
             model.runpod_endpoint_id = endpoint_id
         session.commit()
+
+
+def update_hf_stats(session: Session, hf_repo: str, downloads: int, likes: int):
+    model = session.query(LlmModel).filter(LlmModel.hf_repo == hf_repo).first()
+    if model:
+        model.hf_downloads = downloads
+        model.hf_likes = likes
+        session.commit()
