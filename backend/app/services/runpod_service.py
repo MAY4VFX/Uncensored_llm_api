@@ -90,6 +90,7 @@ async def create_endpoint(
             f' imageName: "{docker_image}",'
             f' dockerArgs: "",'
             f' containerDiskInGb: {container_disk},'
+            f' volumeInGb: 0,'
             f' isServerless: true,'
             f' env: [{env_str}]'
             f' }}) {{ id name }} }}'
