@@ -45,31 +45,32 @@ def _max_context_for_gpu(params_b: float, quant: str, vram_gb: float) -> int:
 def select_gpu(params_b: float, quant: str = "Q4") -> tuple[str, float, int]:
     """
     Select optimal GPU for a model with maximum context.
-    Returns (runpod_pool_ids, cost_per_hour, max_context_length).
+    Returns (gpu_name, cost_per_hour, max_context_length).
+    gpu_name is our canonical name (e.g. 'A100_40GB'), NOT RunPod pool IDs.
     Picks the smallest GPU that fits model weights + at least 8192 context.
     """
     multiplier = QUANT_MULTIPLIERS.get(quant, 1.0)
     model_vram = params_b * multiplier * 1.15
 
     fallback = None
-    for _, vram, cost_hr, pool_ids in GPU_OPTIONS:
+    for gpu_name, vram, cost_hr, _pool_ids in GPU_OPTIONS:
         max_ctx = _max_context_for_gpu(params_b, quant, vram)
         if model_vram < vram and max_ctx >= 4096:
             # Prefer GPU that can do at least 8192 context
             if max_ctx >= 8192:
-                return pool_ids, cost_hr, max_ctx
+                return gpu_name, cost_hr, max_ctx
             # Accept 4096 if no better option
             if fallback is None:
-                fallback = (pool_ids, cost_hr, max_ctx)
+                fallback = (gpu_name, cost_hr, max_ctx)
 
     # If we found a 4096-capable GPU but nothing bigger
     if fallback is not None:
         return fallback
 
     # Fallback to largest GPU
-    _, vram, cost_hr, pool_ids = GPU_OPTIONS[-1]
+    gpu_name, vram, cost_hr, _pool_ids = GPU_OPTIONS[-1]
     max_ctx = _max_context_for_gpu(params_b, quant, vram)
-    return pool_ids, cost_hr, max(max_ctx, 4096)
+    return gpu_name, cost_hr, max(max_ctx, 4096)
 
 
 def estimate_throughput(params_b: float) -> float:

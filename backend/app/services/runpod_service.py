@@ -46,6 +46,7 @@ GPU_ID_MAP = {name: ",".join(ids) for name, _, ids in GPU_TIERS}
 
 def _build_gpu_ids(gpu_type: str) -> str:
     """Build a comma-separated gpuIds string: the requested GPU + all more powerful ones as fallback."""
+    # Try matching by our canonical name first
     found = False
     all_ids = []
     for name, _, ids in GPU_TIERS:
@@ -53,11 +54,24 @@ def _build_gpu_ids(gpu_type: str) -> str:
             found = True
         if found:
             all_ids.extend(ids)
-    if not all_ids:
-        # Fallback: include everything from A100 and up
-        for name, _, ids in GPU_TIERS:
-            if name in ("A100_40GB", "A100_80GB", "H100_80GB", "H200_141GB"):
-                all_ids.extend(ids)
+    if all_ids:
+        return ",".join(all_ids)
+
+    # Legacy: gpu_type may contain RunPod IDs directly (from old scout data)
+    # Find the tier that contains any of these IDs, then build chain from there
+    gpu_type_ids = set(gpu_type.replace(" ", "").split(","))
+    for i, (name, _, ids) in enumerate(GPU_TIERS):
+        if gpu_type_ids & set(ids):
+            all_ids = []
+            for _, _, tier_ids in GPU_TIERS[i:]:
+                all_ids.extend(tier_ids)
+            return ",".join(all_ids)
+
+    # Fallback: include everything from A100 and up
+    all_ids = []
+    for name, _, ids in GPU_TIERS:
+        if name in ("A100_40GB", "A100_80GB", "H100_80GB", "H200_141GB"):
+            all_ids.extend(ids)
     return ",".join(all_ids)
 
 # RunPod serverless GPU hourly cost (USD per GPU) — used for keep warm pricing
