@@ -103,6 +103,8 @@ export const listAllModels = (token: string) =>
       cost_per_1m_input: number;
       cost_per_1m_output: number;
       description: string | null;
+      hf_downloads: number | null;
+      hf_likes: number | null;
     }>
   >("/admin/models", { token });
 
