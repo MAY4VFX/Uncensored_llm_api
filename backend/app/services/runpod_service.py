@@ -27,15 +27,35 @@ def _graphql_headers() -> dict:
     return {"Content-Type": "application/json"}
 
 
-GPU_ID_MAP = {
-    "RTX_4000_Ada_20GB": "AMPERE_16",
-    "RTX_A4500_20GB": "AMPERE_16",
-    "RTX_A5000_24GB": "ADA_24,AMPERE_24",
-    "A100_40GB": "AMPERE_48,ADA_48_PRO",
-    "A100_80GB": "AMPERE_80,ADA_80_PRO,HOPPER_141",
-    "H100_80GB": "HOPPER_80",
-    "H200_141GB": "HOPPER_141",
-}
+# GPUs ordered by VRAM (ascending). Each entry: (our_name, vram_gb, [runpod_ids])
+GPU_TIERS = [
+    ("RTX_4000_Ada_20GB", 20, ["AMPERE_16"]),
+    ("RTX_A5000_24GB", 24, ["ADA_24", "AMPERE_24"]),
+    ("A100_40GB", 48, ["AMPERE_48", "ADA_48_PRO"]),
+    ("A100_80GB", 80, ["AMPERE_80", "ADA_80_PRO"]),
+    ("H100_80GB", 80, ["HOPPER_80"]),
+    ("H200_141GB", 141, ["HOPPER_141"]),
+]
+
+# Legacy map for existing endpoints that already have a gpu_type stored
+GPU_ID_MAP = {name: ",".join(ids) for name, _, ids in GPU_TIERS}
+
+
+def _build_gpu_ids(gpu_type: str) -> str:
+    """Build a comma-separated gpuIds string: the requested GPU + all more powerful ones as fallback."""
+    found = False
+    all_ids = []
+    for name, _, ids in GPU_TIERS:
+        if name == gpu_type:
+            found = True
+        if found:
+            all_ids.extend(ids)
+    if not all_ids:
+        # Fallback: include everything from A100 and up
+        for name, _, ids in GPU_TIERS:
+            if name in ("A100_40GB", "A100_80GB", "H100_80GB", "H200_141GB"):
+                all_ids.extend(ids)
+    return ",".join(all_ids)
 
 # RunPod serverless GPU hourly cost (USD per GPU) — used for keep warm pricing
 GPU_HOURLY_COST = {
@@ -144,7 +164,7 @@ async def create_endpoint(
         template_id = tmpl_data["data"]["saveTemplate"]["id"]
 
         # Step 2: Create endpoint with template
-        runpod_gpu = GPU_ID_MAP.get(gpu_type, "AMPERE_48")
+        runpod_gpu = _build_gpu_ids(gpu_type)
         ep_name = name[:50]
         gpu_count_field = f' gpuCount: {gpu_count},' if gpu_count > 1 else ''
         ep_query = (
