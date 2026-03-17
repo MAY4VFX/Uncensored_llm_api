@@ -49,10 +49,39 @@ GPU_HOURLY_COST = {
 }
 
 
+VLLM_IMAGE_REPO = "runpod/worker-v1-vllm"
+VLLM_IMAGE_FALLBACK = f"{VLLM_IMAGE_REPO}:v2.14.0"
+
+_cached_latest_tag: str | None = None
+
+
+async def _get_latest_vllm_image() -> str:
+    """Fetch the latest stable tag from Docker Hub for the vLLM worker image."""
+    global _cached_latest_tag
+    if _cached_latest_tag:
+        return f"{VLLM_IMAGE_REPO}:{_cached_latest_tag}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://hub.docker.com/v2/repositories/{VLLM_IMAGE_REPO}/tags",
+                params={"page_size": 50, "ordering": "last_updated"},
+            )
+            resp.raise_for_status()
+            for tag in resp.json().get("results", []):
+                name = tag.get("name", "")
+                # Only match stable version tags like v2.14.0
+                if name.startswith("v") and name[1:2].isdigit() and "dev" not in name:
+                    _cached_latest_tag = name
+                    return f"{VLLM_IMAGE_REPO}:{name}"
+    except Exception:
+        pass
+    return VLLM_IMAGE_FALLBACK
+
+
 async def create_endpoint(
     name: str,
     gpu_type: str,
-    docker_image: str = "runpod/worker-v1-vllm:v2.14.0",
+    docker_image: str = "",
     model_name: str = "",
     max_workers: int = 1,
     idle_timeout: int = 30,
@@ -61,6 +90,9 @@ async def create_endpoint(
     gpu_count: int = 1,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
+    if not docker_image:
+        docker_image = await _get_latest_vllm_image()
+
     env_vars = [
         {"key": "MODEL_NAME", "value": model_name},
         {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
