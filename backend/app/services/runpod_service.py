@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 import uuid
 from typing import AsyncGenerator
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 RUNPOD_MANAGE_URL = "https://api.runpod.io/v2"
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
@@ -79,6 +82,7 @@ async def _get_latest_vllm_image() -> str:
     """Fetch the latest stable tag from Docker Hub for the vLLM worker image."""
     global _cached_latest_tag
     if _cached_latest_tag:
+        logger.info(f"Using cached vLLM image tag: {_cached_latest_tag}")
         return f"{VLLM_IMAGE_REPO}:{_cached_latest_tag}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -92,9 +96,11 @@ async def _get_latest_vllm_image() -> str:
                 # Only match stable version tags like v2.14.0
                 if name.startswith("v") and name[1:2].isdigit() and "dev" not in name:
                     _cached_latest_tag = name
+                    logger.info(f"Resolved latest vLLM image: {VLLM_IMAGE_REPO}:{name}")
                     return f"{VLLM_IMAGE_REPO}:{name}"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to fetch latest vLLM tag from Docker Hub: {e}")
+    logger.info(f"Using fallback vLLM image: {VLLM_IMAGE_FALLBACK}")
     return VLLM_IMAGE_FALLBACK
 
 
@@ -112,6 +118,8 @@ async def create_endpoint(
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
     if not docker_image:
         docker_image = await _get_latest_vllm_image()
+
+    logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} params_b={params_b} disk={0}")
 
     env_vars = [
         {"key": "MODEL_NAME", "value": model_name},
@@ -134,7 +142,9 @@ async def create_endpoint(
     else:
         container_disk = 50
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    logger.info(f"Container disk: {container_disk}GB for {params_b}B model")
+
+    async with httpx.AsyncClient(timeout=60) as client:
         # Step 1: Create template (inline mutation — RunPod doesn't support parameterized variables)
         tmpl_name = f"tpl-{name}-{uuid.uuid4().hex[:6]}"[:50]
         env_str = ", ".join(
@@ -160,11 +170,14 @@ async def create_endpoint(
         tmpl_resp.raise_for_status()
         tmpl_data = tmpl_resp.json()
         if "errors" in tmpl_data:
+            logger.error(f"Template creation failed: {tmpl_data['errors']}")
             raise RuntimeError(f"Template creation failed: {tmpl_data['errors']}")
         template_id = tmpl_data["data"]["saveTemplate"]["id"]
+        logger.info(f"Template created: {template_id} ({tmpl_name})")
 
         # Step 2: Create endpoint with template
         runpod_gpu = _build_gpu_ids(gpu_type)
+        logger.info(f"GPU chain: {runpod_gpu} (base: {gpu_type})")
         ep_name = name[:50]
         gpu_count_field = f' gpuCount: {gpu_count},' if gpu_count > 1 else ''
         ep_query = (
@@ -188,7 +201,10 @@ async def create_endpoint(
         ep_resp.raise_for_status()
         ep_data = ep_resp.json()
         if "errors" in ep_data:
+            logger.error(f"Endpoint creation failed: {ep_data['errors']}")
             raise RuntimeError(f"Endpoint creation failed: {ep_data['errors']}")
+        ep_info = ep_data.get("data", {}).get("saveEndpoint", {})
+        logger.info(f"Endpoint created: id={ep_info.get('id')} name={ep_info.get('name')} gpus={ep_info.get('gpuIds')}")
         return ep_data
 
 
