@@ -18,6 +18,42 @@ interface Model {
   hf_likes?: number;
 }
 
+function fmtNum(n?: number) {
+  if (n == null) return null;
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
+}
+
+function HfInfo({ repo, downloads, likes }: { repo: string; downloads?: number; likes?: number }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <a
+        href={`https://huggingface.co/${repo}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-terminal-400 transition-colors underline underline-offset-2"
+      >
+        {repo}
+      </a>
+      {downloads != null && (
+        <span className="inline-flex items-center gap-0.5 text-surface-700" title="Downloads">
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          {fmtNum(downloads)}
+        </span>
+      )}
+      {likes != null && (
+        <span className="inline-flex items-center gap-0.5 text-surface-700" title="Likes">
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+          </svg>
+          {fmtNum(likes)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 const statusDot: Record<string, string> = {
   active: "bg-terminal-500",
   pending: "bg-yellow-400",
@@ -116,7 +152,7 @@ export default function AdminPage() {
                     </span>
                   </div>
                   <p className="text-surface-800 text-sm font-mono mt-1">
-                    {m.hf_repo} &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
+                    <HfInfo repo={m.hf_repo} downloads={m.hf_downloads} likes={m.hf_likes} /> &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
                   </p>
                 </div>
                 <button
@@ -156,7 +192,7 @@ export default function AdminPage() {
                     </span>
                   </div>
                   <p className="text-surface-800 text-sm font-mono mt-1">
-                    {m.hf_repo} &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
+                    <HfInfo repo={m.hf_repo} downloads={m.hf_downloads} likes={m.hf_likes} /> &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
                   </p>
                 </div>
                 <code className="text-surface-600 text-xs font-mono">{m.slug}</code>
@@ -186,7 +222,7 @@ export default function AdminPage() {
                     </span>
                   </div>
                   <p className="text-surface-800 text-sm font-mono mt-1">
-                    {m.hf_repo} &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
+                    <HfInfo repo={m.hf_repo} downloads={m.hf_downloads} likes={m.hf_likes} /> &middot; {m.params_b}B &middot; {m.quantization} &middot; {m.gpu_type}
                   </p>
                 </div>
                 {m.status === "inactive" && (
