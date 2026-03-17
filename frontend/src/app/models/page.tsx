@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ModelCard from "@/components/ModelCard";
-import { listAllModels, deployModel, getMe } from "@/lib/api";
+import { listAllModels, deployModel, addModelFromHf, getMe } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
 interface Model {
@@ -39,6 +39,9 @@ export default function ModelsPage() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [deployingId, setDeployingId] = useState<string | null>(null);
+  const [hfInput, setHfInput] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState("");
 
   useEffect(() => {
     const token = getToken();
@@ -87,6 +90,22 @@ export default function ModelsPage() {
       alert(e.message || "Deploy failed");
     } finally {
       setDeployingId(null);
+    }
+  };
+
+  const handleAddFromHf = async () => {
+    const token = getToken();
+    if (!token || !hfInput.trim()) return;
+    setAdding(true);
+    setAddError("");
+    try {
+      const newModel = await addModelFromHf(token, hfInput.trim());
+      setModels((prev) => [newModel, ...prev]);
+      setHfInput("");
+    } catch (e: any) {
+      setAddError(e.message || "Failed to add model");
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -157,6 +176,34 @@ export default function ModelsPage() {
           </div>
         )}
       </div>
+
+      {isAdmin && (
+        <div className="mb-8 border border-surface-400 bg-surface-100 p-4">
+          <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">
+            Add model from HuggingFace
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="org/model-name"
+              value={hfInput}
+              onChange={(e) => setHfInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddFromHf()}
+              className="input-field flex-1"
+            />
+            <button
+              onClick={handleAddFromHf}
+              disabled={adding || !hfInput.trim()}
+              className="btn-primary text-sm disabled:opacity-50 whitespace-nowrap"
+            >
+              {adding ? "Adding..." : "Add Model"}
+            </button>
+          </div>
+          {addError && (
+            <p className="text-red-400 text-xs font-mono mt-2">{addError}</p>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <p className="text-surface-800 font-mono text-sm">Loading models...</p>

@@ -11,7 +11,19 @@ logger = logging.getLogger(__name__)
 
 HF_API_BASE = "https://huggingface.co/api"
 
-SEARCH_TERMS = ["uncensored", "abliterated", "heretic"]
+SEARCH_TERMS = [
+    "uncensored",
+    "abliterated",
+    "heretic",
+    "unfiltered",
+    "unrestricted",
+    "decensored",
+    "no-refusal",
+    "unaligned",
+    "fallen",
+    "distilled",
+    "reasoning",
+]
 VALID_FORMATS = {"safetensors", "gguf"}
 MIN_PARAMS_B = 2.0
 MAX_PARAMS_B = 70.0

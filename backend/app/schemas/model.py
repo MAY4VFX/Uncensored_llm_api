@@ -35,5 +35,9 @@ class CreateModelRequest(BaseModel):
     description: str | None = None
 
 
+class AddFromHfRequest(BaseModel):
+    hf_repo: str
+
+
 class UpdateModelStatusRequest(BaseModel):
     status: str

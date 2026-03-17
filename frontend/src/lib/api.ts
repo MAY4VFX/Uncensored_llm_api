@@ -108,6 +108,13 @@ export const listAllModels = (token: string) =>
     }>
   >("/admin/models", { token });
 
+export const addModelFromHf = (token: string, hfRepo: string) =>
+  apiFetch<any>("/admin/models/add-from-hf", {
+    method: "POST",
+    token,
+    body: { hf_repo: hfRepo },
+  });
+
 export const deployModel = (token: string, modelId: string) =>
   apiFetch<{ detail: string; endpoint_id: string }>(`/admin/models/${modelId}/deploy`, {
     method: "POST",
