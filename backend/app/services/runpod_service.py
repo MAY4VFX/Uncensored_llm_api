@@ -69,16 +69,13 @@ async def create_endpoint(
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
 
-    # Scale disk size based on model parameters (fp16: ~2 bytes/param + overhead)
+    # Scale container disk size based on model parameters (fp16: ~2 bytes/param + overhead)
     if params_b >= 20:
         container_disk = 80
-        volume_gb = 120
     elif params_b >= 10:
         container_disk = 60
-        volume_gb = 100
     else:
         container_disk = 40
-        volume_gb = 80
 
     async with httpx.AsyncClient(timeout=30) as client:
         # Step 1: Create template (inline mutation — RunPod doesn't support parameterized variables)
@@ -93,7 +90,6 @@ async def create_endpoint(
             f' imageName: "{docker_image}",'
             f' dockerArgs: "",'
             f' containerDiskInGb: {container_disk},'
-            f' volumeInGb: {volume_gb},'
             f' isServerless: true,'
             f' env: [{env_str}]'
             f' }}) {{ id name }} }}'
