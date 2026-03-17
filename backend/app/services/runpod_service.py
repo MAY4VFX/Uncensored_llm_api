@@ -69,13 +69,18 @@ async def create_endpoint(
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
 
-    # Scale container disk size based on model parameters (fp16: ~2 bytes/param + overhead)
-    if params_b >= 20:
-        container_disk = 80
+    # Scale container disk based on model size (model weights + runtime overhead)
+    # FP16: ~2 bytes/param, Q4: ~0.5 bytes/param, plus vLLM/CUDA overhead (~15GB)
+    if params_b >= 65:
+        container_disk = 200
+    elif params_b >= 30:
+        container_disk = 120
+    elif params_b >= 20:
+        container_disk = 100
     elif params_b >= 10:
-        container_disk = 60
+        container_disk = 80
     else:
-        container_disk = 40
+        container_disk = 50
 
     async with httpx.AsyncClient(timeout=30) as client:
         # Step 1: Create template (inline mutation — RunPod doesn't support parameterized variables)
