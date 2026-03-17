@@ -17,6 +17,8 @@ class ModelResponse(BaseModel):
     cost_per_1m_input: float
     cost_per_1m_output: float
     description: str | None
+    hf_downloads: int | None = None
+    hf_likes: int | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

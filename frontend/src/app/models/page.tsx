@@ -18,6 +18,8 @@ interface Model {
   cost_per_1m_input: number;
   cost_per_1m_output: number;
   description: string | null;
+  hf_downloads: number | null;
+  hf_likes: number | null;
 }
 
 export default function ModelsPage() {
@@ -53,6 +55,8 @@ export default function ModelsPage() {
               cost_per_1m_output: 0,
               description: null,
               hf_repo: "",
+              hf_downloads: null,
+              hf_likes: null,
             })) || []
           );
         })
@@ -126,6 +130,9 @@ export default function ModelsPage() {
               costInput={m.cost_per_1m_input}
               costOutput={m.cost_per_1m_output}
               description={m.description}
+              hfRepo={m.hf_repo}
+              hfDownloads={m.hf_downloads}
+              hfLikes={m.hf_likes}
               isAdmin={isAdmin}
               onDeploy={handleDeploy}
               deploying={deployingId === m.id}
