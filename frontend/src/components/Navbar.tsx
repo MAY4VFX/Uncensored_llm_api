@@ -61,11 +61,6 @@ export default function Navbar() {
               <Link href="/playground" className={navLink}>Playground</Link>
               <Link href="/docs" className={navLink}>Docs</Link>
               {user && <Link href="/dashboard" className={navLink}>Dashboard</Link>}
-              {user?.is_admin && (
-                <Link href="/admin" className="text-terminal-600 hover:text-terminal-400 text-xs font-mono uppercase tracking-widest transition-colors">
-                  Admin
-                </Link>
-              )}
             </div>
           </div>
 
