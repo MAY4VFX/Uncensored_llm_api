@@ -119,9 +119,11 @@ async def _get_latest_vllm_image() -> str:
 
 
 async def _resolve_gguf(hf_repo: str) -> tuple[str, str]:
-    """Resolve a GGUF HuggingFace repo to a direct .gguf file URL and base tokenizer.
+    """Resolve a GGUF HuggingFace repo to repo/file.gguf path and base model.
 
-    Returns (gguf_file_url, tokenizer_repo).
+    Returns (model_path, base_model).
+    model_path: "repo_id/filename.gguf" format for vLLM gguf_loader.
+    base_model: used for both tokenizer and hf_config_path.
     Picks Q4_K_M if available, otherwise the first .gguf file found.
     """
     try:
@@ -148,8 +150,8 @@ async def _resolve_gguf(hf_repo: str) -> tuple[str, str]:
             chosen = match[0]
             break
 
-    # Direct download URL — vLLM accepts local paths or URLs
-    gguf_url = f"https://huggingface.co/{hf_repo}/resolve/main/{chosen}"
+    # vLLM gguf_loader accepts "repo_id/filename.gguf" format (PR #20793)
+    gguf_url = f"{hf_repo}/{chosen}"
 
     # Resolve base model tokenizer from cardData or tags
     tokenizer = ""
@@ -203,6 +205,7 @@ async def create_endpoint(
     ]
     if tokenizer:
         env_vars.append({"key": "TOKENIZER_NAME", "value": tokenizer})
+        env_vars.append({"key": "HF_CONFIG_PATH", "value": tokenizer})
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
 
