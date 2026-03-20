@@ -148,8 +148,8 @@ async def _resolve_gguf(hf_repo: str) -> tuple[str, str]:
             chosen = match[0]
             break
 
-    # vLLM supports HF GGUF via "repo_id/filename.gguf" format (PR #20793)
-    gguf_url = f"{hf_repo}/{chosen}"
+    # Direct download URL — vLLM accepts local paths or URLs
+    gguf_url = f"https://huggingface.co/{hf_repo}/resolve/main/{chosen}"
 
     # Resolve base model tokenizer from cardData or tags
     tokenizer = ""
