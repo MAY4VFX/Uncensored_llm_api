@@ -4,12 +4,13 @@ QUANT_MULTIPLIERS = {"Q4": 0.5, "Q8": 1.0, "FP16": 2.0}
 
 # (primary_gpu_id, vram_gb, cost_per_hour, runpod_pool_ids)
 # pool_ids: comma-separated RunPod pool IDs for fallback availability
+# Excluded A40/L40S (48GB) — always Low Supply on RunPod, causes throttling
 GPU_OPTIONS = [
     ("RTX_4000_Ada_20GB", 8, 0.17, "AMPERE_16"),
-    ("RTX_A4500_20GB", 16, 0.22, "AMPERE_16"),
     ("RTX_A5000_24GB", 24, 0.28, "ADA_24,AMPERE_24"),
-    ("A100_40GB", 48, 1.19, "AMPERE_48,ADA_48_PRO"),
-    ("A100_80GB", 80, 1.99, "AMPERE_80,ADA_80_PRO,HOPPER_141"),
+    ("A100_80GB", 80, 1.99, "AMPERE_80,ADA_80_PRO"),
+    ("H100_80GB", 80, 2.49, "HOPPER_80"),
+    ("H200_141GB", 141, 3.29, "HOPPER_141"),
 ]
 
 

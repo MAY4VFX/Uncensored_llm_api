@@ -17,9 +17,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 GPU_MATRIX = {
     "RTX_4000_Ada_20GB": 8,
-    "RTX_A4500_20GB": 16,
     "RTX_A5000_24GB": 24,
-    "A100_40GB": 40,
     "A100_80GB": 80,
     "H100_80GB": 80,
     "H200_141GB": 141,

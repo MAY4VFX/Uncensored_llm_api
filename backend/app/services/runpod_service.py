@@ -31,10 +31,10 @@ def _graphql_headers() -> dict:
 
 
 # GPUs ordered by VRAM (ascending). Each entry: (our_name, vram_gb, [runpod_ids])
+# Excluded: A40/L40S (AMPERE_48, ADA_48_PRO) — always Low Supply, causes throttling
 GPU_TIERS = [
     ("RTX_4000_Ada_20GB", 20, ["AMPERE_16"]),
     ("RTX_A5000_24GB", 24, ["ADA_24", "AMPERE_24"]),
-    ("A100_40GB", 48, ["AMPERE_48", "ADA_48_PRO"]),
     ("A100_80GB", 80, ["AMPERE_80", "ADA_80_PRO"]),
     ("H100_80GB", 80, ["HOPPER_80"]),
     ("H200_141GB", 141, ["HOPPER_141"]),
