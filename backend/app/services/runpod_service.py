@@ -118,6 +118,59 @@ async def _get_latest_vllm_image() -> str:
     return VLLM_IMAGE_FALLBACK
 
 
+async def _resolve_gguf(hf_repo: str) -> tuple[str, str]:
+    """Resolve a GGUF HuggingFace repo to a direct .gguf file URL and base tokenizer.
+
+    Returns (gguf_file_url, tokenizer_repo).
+    Picks Q4_K_M if available, otherwise the first .gguf file found.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"https://huggingface.co/api/models/{hf_repo}")
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.warning(f"Failed to fetch GGUF repo metadata: {e}")
+        return hf_repo, ""
+
+    # Find best .gguf file (prefer Q4_K_M)
+    siblings = data.get("siblings", [])
+    gguf_files = [s["rfilename"] for s in siblings if s.get("rfilename", "").endswith(".gguf") and not s["rfilename"].startswith("mmproj")]
+    if not gguf_files:
+        logger.warning(f"No .gguf files found in {hf_repo}")
+        return hf_repo, ""
+
+    # Priority: Q4_K_M > Q4_K_S > Q8_0 > first available
+    chosen = gguf_files[0]
+    for preferred in ["Q4_K_M", "Q4_K_S", "Q8_0"]:
+        match = [f for f in gguf_files if preferred in f]
+        if match:
+            chosen = match[0]
+            break
+
+    # vLLM supports HF GGUF via "repo_id/filename.gguf" format (PR #20793)
+    gguf_url = f"{hf_repo}/{chosen}"
+
+    # Resolve base model tokenizer from cardData or tags
+    tokenizer = ""
+    card_data = data.get("cardData", {})
+    base_model = card_data.get("base_model", "")
+    if isinstance(base_model, list):
+        base_model = base_model[0] if base_model else ""
+    if base_model:
+        tokenizer = base_model
+
+    if not tokenizer:
+        # Try to find base_model from tags
+        for tag in data.get("tags", []):
+            if tag.startswith("base_model:") and "quantized" not in tag:
+                tokenizer = tag.split(":", 1)[1]
+                break
+
+    logger.info(f"GGUF resolved: {chosen} from {hf_repo}, tokenizer={tokenizer}")
+    return gguf_url, tokenizer
+
+
 async def create_endpoint(
     name: str,
     gpu_type: str,
@@ -133,13 +186,23 @@ async def create_endpoint(
     if not docker_image:
         docker_image = await _get_latest_vllm_image()
 
-    logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} params_b={params_b} disk={0}")
+    logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} params_b={params_b}")
+
+    # GGUF models: resolve to direct .gguf file URL + set tokenizer from base model
+    is_gguf = "-gguf" in model_name.lower() or "-GGUF" in model_name
+    tokenizer = ""
+    if is_gguf:
+        gguf_file, tokenizer = await _resolve_gguf(model_name)
+        logger.info(f"GGUF model resolved: file={gguf_file} tokenizer={tokenizer}")
+        model_name = gguf_file
 
     env_vars = [
         {"key": "MODEL_NAME", "value": model_name},
         {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
         {"key": "TRUST_REMOTE_CODE", "value": "1"},
     ]
+    if tokenizer:
+        env_vars.append({"key": "TOKENIZER_NAME", "value": tokenizer})
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
 
