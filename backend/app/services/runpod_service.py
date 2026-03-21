@@ -185,27 +185,33 @@ async def create_endpoint(
     gpu_count: int = 1,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
-    if not docker_image:
-        docker_image = await _get_latest_vllm_image()
-
-    logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} params_b={params_b}")
-
-    # GGUF models: resolve to direct .gguf file URL + set tokenizer from base model
     is_gguf = "-gguf" in model_name.lower() or "-GGUF" in model_name
-    tokenizer = ""
-    if is_gguf:
-        gguf_file, tokenizer = await _resolve_gguf(model_name)
-        logger.info(f"GGUF model resolved: file={gguf_file} tokenizer={tokenizer}")
-        model_name = gguf_file
+
+    if not docker_image:
+        if is_gguf:
+            docker_image = "may4vfx/worker-vllm-gguf:latest"  # vLLM 0.18+ with GGUF support
+        else:
+            docker_image = await _get_latest_vllm_image()
+
+    logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} gguf={is_gguf}")
 
     env_vars = [
         {"key": "MODEL_NAME", "value": model_name},
         {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
         {"key": "TRUST_REMOTE_CODE", "value": "1"},
     ]
-    if tokenizer:
-        env_vars.append({"key": "TOKENIZER_NAME", "value": tokenizer})
-        env_vars.append({"key": "HF_CONFIG_PATH", "value": tokenizer})
+
+    if is_gguf:
+        gguf_file, tokenizer = await _resolve_gguf(model_name)
+        logger.info(f"GGUF resolved: file={gguf_file} tokenizer={tokenizer}")
+        # Keep MODEL_NAME as repo ID, specify file via MODEL_WEIGHTS
+        env_vars.append({"key": "MODEL_WEIGHTS", "value": gguf_file.split("/")[-1]})
+        env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
+        env_vars.append({"key": "LANGUAGE_MODEL_ONLY", "value": "true"})
+        if tokenizer:
+            env_vars.append({"key": "TOKENIZER_NAME", "value": tokenizer})
+            env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
+
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
 
