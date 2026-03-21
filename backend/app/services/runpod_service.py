@@ -232,7 +232,7 @@ async def create_endpoint(
 
     async with httpx.AsyncClient(timeout=60) as client:
         # Step 1: Create template (inline mutation — RunPod doesn't support parameterized variables)
-        tmpl_name = f"tpl-{name}-{uuid.uuid4().hex[:6]}"[:50]
+        tmpl_name = f"tpl-{uuid.uuid4().hex[:12]}"
         env_str = ", ".join(
             f'{{key: "{e["key"]}", value: "{e["value"]}"}}'
             for e in env_vars
