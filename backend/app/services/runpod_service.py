@@ -194,26 +194,28 @@ async def create_endpoint(
 
     logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} gguf={is_gguf}")
 
+    if is_gguf:
+        gguf_info = await _resolve_gguf(model_name)
+        logger.info(f"GGUF config: {gguf_info}")
+        # vLLM gguf_loader expects "repo_id/filename.gguf" as model name
+        gguf_model_ref = model_name
+        if gguf_info["gguf_file"]:
+            gguf_model_ref = f"{model_name}/{gguf_info['gguf_file']}"
+        base = gguf_info.get("base_model", "")
+
     env_vars = [
-        {"key": "MODEL_NAME", "value": model_name},
+        {"key": "MODEL_NAME", "value": gguf_model_ref if is_gguf else model_name},
         {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
         {"key": "TRUST_REMOTE_CODE", "value": "1"},
     ]
 
     if is_gguf:
-        gguf_info = await _resolve_gguf(model_name)
-        logger.info(f"GGUF config: {gguf_info}")
-        if gguf_info["gguf_file"]:
-            env_vars.append({"key": "MODEL_WEIGHTS", "value": gguf_info["gguf_file"]})
         env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
         env_vars.append({"key": "LANGUAGE_MODEL_ONLY", "value": "true"})
-        base = gguf_info.get("base_model", "")
         if base:
             env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
-            # If GGUF repo has no config.json, use base model for config
-            if not gguf_info.get("has_config"):
-                env_vars.append({"key": "HF_CONFIG_PATH", "value": base})
+            env_vars.append({"key": "HF_CONFIG_PATH", "value": base})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
