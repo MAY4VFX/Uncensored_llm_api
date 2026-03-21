@@ -118,14 +118,16 @@ async def _get_latest_vllm_image() -> str:
     return VLLM_IMAGE_FALLBACK
 
 
-async def _resolve_gguf(hf_repo: str) -> tuple[str, str]:
-    """Resolve a GGUF HuggingFace repo to repo/file.gguf path and base model.
+async def _resolve_gguf(hf_repo: str) -> dict:
+    """Resolve a GGUF HuggingFace repo to deployment config.
 
-    Returns (model_path, base_model).
-    model_path: "repo_id/filename.gguf" format for vLLM gguf_loader.
-    base_model: used for both tokenizer and hf_config_path.
-    Picks Q4_K_M if available, otherwise the first .gguf file found.
+    Returns dict with keys:
+    - gguf_file: filename of chosen .gguf file
+    - base_model: HF repo of base model (for tokenizer + config)
+    - has_config: whether the GGUF repo has its own config.json
     """
+    result = {"gguf_file": "", "base_model": "", "has_config": False}
+
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(f"https://huggingface.co/api/models/{hf_repo}")
@@ -133,44 +135,41 @@ async def _resolve_gguf(hf_repo: str) -> tuple[str, str]:
             data = resp.json()
     except Exception as e:
         logger.warning(f"Failed to fetch GGUF repo metadata: {e}")
-        return hf_repo, ""
+        return result
 
-    # Find best .gguf file (prefer Q4_K_M)
+    # Find best .gguf file (prefer Q4_K_M > Q4_K_S > Q8_0)
     siblings = data.get("siblings", [])
-    gguf_files = [s["rfilename"] for s in siblings if s.get("rfilename", "").endswith(".gguf") and not s["rfilename"].startswith("mmproj")]
+    filenames = [s["rfilename"] for s in siblings]
+    gguf_files = [f for f in filenames if f.endswith(".gguf") and not f.startswith("mmproj")]
     if not gguf_files:
         logger.warning(f"No .gguf files found in {hf_repo}")
-        return hf_repo, ""
+        return result
 
-    # Priority: Q4_K_M > Q4_K_S > Q8_0 > first available
     chosen = gguf_files[0]
     for preferred in ["Q4_K_M", "Q4_K_S", "Q8_0"]:
         match = [f for f in gguf_files if preferred in f]
         if match:
             chosen = match[0]
             break
+    result["gguf_file"] = chosen
 
-    # vLLM gguf_loader accepts "repo_id/filename.gguf" format (PR #20793)
-    gguf_url = f"{hf_repo}/{chosen}"
+    # Check if repo has config.json
+    result["has_config"] = "config.json" in filenames
 
-    # Resolve base model tokenizer from cardData or tags
-    tokenizer = ""
-    card_data = data.get("cardData", {})
+    # Resolve base model from cardData or tags
+    card_data = data.get("cardData") or {}
     base_model = card_data.get("base_model", "")
     if isinstance(base_model, list):
         base_model = base_model[0] if base_model else ""
-    if base_model:
-        tokenizer = base_model
-
-    if not tokenizer:
-        # Try to find base_model from tags
+    if not base_model:
         for tag in data.get("tags", []):
             if tag.startswith("base_model:") and "quantized" not in tag:
-                tokenizer = tag.split(":", 1)[1]
+                base_model = tag.split(":", 1)[1]
                 break
+    result["base_model"] = base_model
 
-    logger.info(f"GGUF resolved: {chosen} from {hf_repo}, tokenizer={tokenizer}")
-    return gguf_url, tokenizer
+    logger.info(f"GGUF resolved: file={chosen} base={base_model} has_config={result['has_config']} from {hf_repo}")
+    return result
 
 
 async def create_endpoint(
@@ -202,15 +201,19 @@ async def create_endpoint(
     ]
 
     if is_gguf:
-        gguf_file, tokenizer = await _resolve_gguf(model_name)
-        logger.info(f"GGUF resolved: file={gguf_file} tokenizer={tokenizer}")
-        # Keep MODEL_NAME as repo ID, specify file via MODEL_WEIGHTS
-        env_vars.append({"key": "MODEL_WEIGHTS", "value": gguf_file.split("/")[-1]})
+        gguf_info = await _resolve_gguf(model_name)
+        logger.info(f"GGUF config: {gguf_info}")
+        if gguf_info["gguf_file"]:
+            env_vars.append({"key": "MODEL_WEIGHTS", "value": gguf_info["gguf_file"]})
         env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
         env_vars.append({"key": "LANGUAGE_MODEL_ONLY", "value": "true"})
-        if tokenizer:
-            env_vars.append({"key": "TOKENIZER_NAME", "value": tokenizer})
+        base = gguf_info.get("base_model", "")
+        if base:
+            env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
+            # If GGUF repo has no config.json, use base model for config
+            if not gguf_info.get("has_config"):
+                env_vars.append({"key": "HF_CONFIG_PATH", "value": base})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
