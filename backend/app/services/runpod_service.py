@@ -199,9 +199,13 @@ async def create_endpoint(
         logger.info(f"GGUF config: {gguf_info}")
         base = gguf_info.get("base_model", "")
 
+    # For GGUF: MODEL_NAME must be "repo_id/filename.gguf" format (vLLM GGUF loader requirement)
+    gguf_model_name = model_name
+    if is_gguf and gguf_info.get("gguf_file"):
+        gguf_model_name = f"{model_name}/{gguf_info['gguf_file']}"
+
     env_vars = [
-        # For GGUF: MODEL_NAME is just the HF repo; gguf_file goes in MODEL_LOADER_EXTRA_CONFIG
-        {"key": "MODEL_NAME", "value": model_name},
+        {"key": "MODEL_NAME", "value": gguf_model_name},
         {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
         {"key": "TRUST_REMOTE_CODE", "value": "1"},
     ]
