@@ -207,10 +207,8 @@ async def create_endpoint(
     ]
 
     if is_gguf:
-        import json as _json
-        env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
-        if gguf_info["gguf_file"]:
-            env_vars.append({"key": "MODEL_LOADER_EXTRA_CONFIG", "value": _json.dumps({"gguf_file": gguf_info["gguf_file"]})})
+        # vLLM auto-detects GGUF from file extension — no LOAD_FORMAT or MODEL_LOADER_EXTRA_CONFIG needed
+        # (GGUF loader explicitly rejects model_loader_extra_config)
         if base:
             env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
