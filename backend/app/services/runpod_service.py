@@ -197,25 +197,23 @@ async def create_endpoint(
     if is_gguf:
         gguf_info = await _resolve_gguf(model_name)
         logger.info(f"GGUF config: {gguf_info}")
-        # vLLM 0.6+ expects "hf:repo_id/filename.gguf" for HuggingFace GGUF files
-        gguf_model_ref = model_name
-        if gguf_info["gguf_file"]:
-            gguf_model_ref = f"hf:{model_name}/{gguf_info['gguf_file']}"
         base = gguf_info.get("base_model", "")
 
     env_vars = [
-        {"key": "MODEL_NAME", "value": gguf_model_ref if is_gguf else model_name},
+        # For GGUF: MODEL_NAME is just the HF repo; gguf_file goes in MODEL_LOADER_EXTRA_CONFIG
+        {"key": "MODEL_NAME", "value": model_name},
         {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
         {"key": "TRUST_REMOTE_CODE", "value": "1"},
     ]
 
     if is_gguf:
         env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
-        env_vars.append({"key": "LANGUAGE_MODEL_ONLY", "value": "true"})
+        if gguf_info["gguf_file"]:
+            import json as _json
+            env_vars.append({"key": "MODEL_LOADER_EXTRA_CONFIG", "value": _json.dumps({"gguf_file": gguf_info["gguf_file"]})})
         if base:
             env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
-            env_vars.append({"key": "HF_CONFIG_PATH", "value": base})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
