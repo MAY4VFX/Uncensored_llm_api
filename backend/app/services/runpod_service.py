@@ -207,13 +207,15 @@ async def create_endpoint(
     ]
 
     if is_gguf:
+        import json as _json
         env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
         if gguf_info["gguf_file"]:
-            import json as _json
             env_vars.append({"key": "MODEL_LOADER_EXTRA_CONFIG", "value": _json.dumps({"gguf_file": gguf_info["gguf_file"]})})
         if base:
             env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
+        # Override multimodal VL config to text-only (GGUF only has text weights)
+        env_vars.append({"key": "HF_OVERRIDES", "value": _json.dumps({"architectures": ["Qwen2ForCausalLM"], "model_type": "qwen2"})})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
