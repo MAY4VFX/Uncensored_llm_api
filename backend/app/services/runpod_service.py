@@ -187,10 +187,8 @@ async def create_endpoint(
     is_gguf = "-gguf" in model_name.lower() or "-GGUF" in model_name
 
     if not docker_image:
-        if is_gguf:
-            docker_image = "may4vfx/worker-vllm-gguf:latest"  # vLLM 0.18+ with GGUF support
-        else:
-            docker_image = await _get_latest_vllm_image()
+        # Use the same latest vLLM worker for both GGUF and non-GGUF models
+        docker_image = await _get_latest_vllm_image()
 
     logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} gguf={is_gguf}")
 
@@ -214,8 +212,8 @@ async def create_endpoint(
         if base:
             env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
-        # Override multimodal VL config to text-only (GGUF only has text weights)
-        env_vars.append({"key": "HF_OVERRIDES", "value": _json.dumps({"architectures": ["Qwen2ForCausalLM"], "model_type": "qwen2"})})
+        # Disable multimodal processing — GGUF only has text weights
+        env_vars.append({"key": "LIMIT_MM_PER_PROMPT", "value": "image=0,video=0"})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
