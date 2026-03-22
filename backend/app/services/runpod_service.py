@@ -187,8 +187,10 @@ async def create_endpoint(
     is_gguf = "-gguf" in model_name.lower() or "-GGUF" in model_name
 
     if not docker_image:
-        # Use the same latest vLLM worker for both GGUF and non-GGUF models
-        docker_image = await _get_latest_vllm_image()
+        if is_gguf:
+            docker_image = "may4vfx/worker-vllm-gguf:latest"  # nightly vLLM + transformers main (Qwen3.5 + GGUF)
+        else:
+            docker_image = await _get_latest_vllm_image()
 
     logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} gguf={is_gguf}")
 
