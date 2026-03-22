@@ -197,10 +197,10 @@ async def create_endpoint(
     if is_gguf:
         gguf_info = await _resolve_gguf(model_name)
         logger.info(f"GGUF config: {gguf_info}")
-        # vLLM gguf_loader expects "repo_id/filename.gguf" as model name
+        # vLLM 0.6+ expects "hf:repo_id/filename.gguf" for HuggingFace GGUF files
         gguf_model_ref = model_name
         if gguf_info["gguf_file"]:
-            gguf_model_ref = f"{model_name}/{gguf_info['gguf_file']}"
+            gguf_model_ref = f"hf:{model_name}/{gguf_info['gguf_file']}"
         base = gguf_info.get("base_model", "")
 
     env_vars = [
