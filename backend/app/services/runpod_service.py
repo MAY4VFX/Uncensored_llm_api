@@ -237,7 +237,7 @@ async def create_endpoint(
         # Step 1: Create template (inline mutation — RunPod doesn't support parameterized variables)
         tmpl_name = f"tpl-{uuid.uuid4().hex[:12]}"
         env_str = ", ".join(
-            f'{{key: "{e["key"]}", value: "{e["value"]}"}}'
+            f'{{key: "{e["key"]}", value: "{e["value"].replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))}"}}'
             for e in env_vars
         )
         tmpl_query = (
