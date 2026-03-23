@@ -217,6 +217,8 @@ async def create_endpoint(
         if base:
             env_vars.append({"key": "TOKENIZER_NAME", "value": base})
             env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
+            # HF_CONFIG_PATH tells vLLM where to load config from (avoids repo_id/file.gguf parsing error)
+            env_vars.append({"key": "HF_CONFIG_PATH", "value": base})
         # Disable multimodal processing — GGUF only has text weights
         env_vars.append({"key": "LIMIT_MM_PER_PROMPT", "value": "image=0,video=0"})
 
