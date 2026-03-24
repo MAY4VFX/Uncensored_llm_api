@@ -221,6 +221,7 @@ async def deploy_model(
             params_b=float(model.params_b or 0),
             max_model_len=model.max_context_length or 4096,
             gpu_count=model.gpu_count or 1,
+            db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
         model.runpod_endpoint_id = endpoint_data.get("id")

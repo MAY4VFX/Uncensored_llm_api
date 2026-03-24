@@ -172,6 +172,62 @@ async def _resolve_gguf(hf_repo: str) -> dict:
     return result
 
 
+RUNPOD_MAX_ENDPOINTS = 5  # RunPod account quota
+
+
+async def _ensure_endpoint_quota(db) -> None:
+    """If at endpoint quota, remove the least-used endpoint to make room.
+
+    Sets the freed model to 'inactive' in the database.
+    """
+    from app.models import LlmModel
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            _graphql_url(), headers=_graphql_headers(),
+            json={"query": "{ myself { endpoints { id name } } }"},
+        )
+        resp.raise_for_status()
+        endpoints = resp.json().get("data", {}).get("myself", {}).get("endpoints", [])
+
+    if len(endpoints) < RUNPOD_MAX_ENDPOINTS:
+        return  # quota ok
+
+    logger.warning(f"Endpoint quota reached ({len(endpoints)}/{RUNPOD_MAX_ENDPOINTS}), freeing one slot")
+
+    # Find which models own these endpoints
+    from sqlalchemy import select as sa_select
+    result = await db.execute(
+        sa_select(LlmModel).where(LlmModel.runpod_endpoint_id.isnot(None))
+    )
+    models_with_endpoints = {m.runpod_endpoint_id: m for m in result.scalars().all()}
+
+    # Pick the endpoint to remove: prefer models that are idle (no active workers)
+    # For simplicity, remove the first endpoint that isn't currently being deployed
+    for ep in reversed(endpoints):  # reversed = oldest first
+        ep_id = ep["id"]
+        model = models_with_endpoints.get(ep_id)
+        if model:
+            logger.info(f"Freeing endpoint {ep_id} (model: {model.slug}) to make room")
+            try:
+                await delete_endpoint(ep_id)
+            except Exception:
+                logger.warning(f"Failed to delete endpoint {ep_id}, trying next")
+                continue
+            model.runpod_endpoint_id = None
+            model.status = "inactive"
+            await db.commit()
+            return
+
+    # If no model-linked endpoint found, delete the last one
+    ep_id = endpoints[-1]["id"]
+    logger.info(f"Freeing unlinked endpoint {ep_id}")
+    try:
+        await delete_endpoint(ep_id)
+    except Exception:
+        pass
+
+
 async def create_endpoint(
     name: str,
     gpu_type: str,
@@ -182,8 +238,11 @@ async def create_endpoint(
     params_b: float = 0,
     max_model_len: int = 4096,
     gpu_count: int = 1,
+    db=None,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
+    if db:
+        await _ensure_endpoint_quota(db)
     is_gguf = "-gguf" in model_name.lower() or "-GGUF" in model_name
 
     if not docker_image:
