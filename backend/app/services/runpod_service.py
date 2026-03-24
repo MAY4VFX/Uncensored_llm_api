@@ -188,7 +188,7 @@ async def create_endpoint(
 
     if not docker_image:
         if is_gguf:
-            docker_image = "may4vfx/worker-vllm-gguf:latest"  # nightly vLLM + transformers main (Qwen3.5 + GGUF)
+            docker_image = "may4vfx/worker-llamacpp:latest"  # llama.cpp based worker (native GGUF support)
         else:
             docker_image = await _get_latest_vllm_image()
 
@@ -197,30 +197,26 @@ async def create_endpoint(
     if is_gguf:
         gguf_info = await _resolve_gguf(model_name)
         logger.info(f"GGUF config: {gguf_info}")
-        base = gguf_info.get("base_model", "")
+        # For GGUF: use llama.cpp worker with -hf repo:quant format
+        # Determine quant type from chosen gguf filename (e.g. "Qwen3.5-27B.Q4_K_M.gguf" -> "Q4_K_M")
+        gguf_file = gguf_info.get("gguf_file", "")
+        quant_type = ""
+        if gguf_file:
+            # Extract quant from filename: "Model.Q4_K_M.gguf" -> "Q4_K_M"
+            parts = gguf_file.rsplit(".", 2)  # ["Model", "Q4_K_M", "gguf"]
+            if len(parts) >= 3:
+                quant_type = parts[-2]  # "Q4_K_M"
 
-    # For GGUF: MODEL_NAME must be "repo_id/filename.gguf" format (vLLM GGUF loader requirement)
-    gguf_model_name = model_name
-    if is_gguf and gguf_info.get("gguf_file"):
-        gguf_model_name = f"{model_name}/{gguf_info['gguf_file']}"
-
-    env_vars = [
-        {"key": "MODEL_NAME", "value": gguf_model_name},
-        {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
-        {"key": "TRUST_REMOTE_CODE", "value": "1"},
-    ]
-
-    if is_gguf:
-        # LOAD_FORMAT=gguf required so vLLM uses GGUF loader (auto skips .gguf files)
-        # Do NOT set MODEL_LOADER_EXTRA_CONFIG — GGUF loader rejects it
-        env_vars.append({"key": "LOAD_FORMAT", "value": "gguf"})
-        if base:
-            env_vars.append({"key": "TOKENIZER_NAME", "value": base})
-            env_vars.append({"key": "TOKENIZER_REVISION", "value": "main"})
-            # HF_CONFIG_PATH tells vLLM where to load config from (avoids repo_id/file.gguf parsing error)
-            env_vars.append({"key": "HF_CONFIG_PATH", "value": base})
-        # Disable multimodal processing — GGUF only has text weights
-        env_vars.append({"key": "LIMIT_MM_PER_PROMPT", "value": "image=0,video=0"})
+        llama_args = f"-hf {model_name}:{quant_type} --ctx-size {max_model_len} -ngl 999"
+        env_vars = [
+            {"key": "LLAMA_SERVER_CMD_ARGS", "value": llama_args},
+        ]
+    else:
+        env_vars = [
+            {"key": "MODEL_NAME", "value": model_name},
+            {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
+            {"key": "TRUST_REMOTE_CODE", "value": "1"},
+        ]
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
