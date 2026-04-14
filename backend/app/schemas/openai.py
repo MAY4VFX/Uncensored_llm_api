@@ -1,9 +1,29 @@
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, field_validator
 
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _coerce_content(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v
+        if isinstance(v, list):
+            parts: list[str] = []
+            for item in v:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    if item.get("type") == "text" and isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+            return "\n".join(parts)
+        return str(v)
 
 
 class ChatCompletionRequest(BaseModel):
