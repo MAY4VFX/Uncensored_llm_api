@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 
+const BASE_URL = "https://llm.ai-vfx.com/api/v1";
+const MODEL = "davidau-qwen3-30b-a3b-claude-4-5-opus-high-reasoning-2507-abliterated-uncensored-v2";
+
 const examples = {
-  curl: `curl -X POST https://api.unchained.ai/v1/chat/completions \\
+  curl: `curl -X POST ${BASE_URL}/chat/completions \\
   -H "Authorization: Bearer sk-unch-your-key-here" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "your-model-slug",
+    "model": "${MODEL}",
     "messages": [
       {"role": "user", "content": "Hello, how are you?"}
     ],
@@ -18,16 +21,16 @@ const examples = {
 
 client = OpenAI(
     api_key="sk-unch-your-key-here",
-    base_url="https://api.unchained.ai/v1"
+    base_url="${BASE_URL}"
 )
 
 response = client.chat.completions.create(
-    model="your-model-slug",
+    model="${MODEL}",
     messages=[
         {"role": "user", "content": "Hello, how are you?"}
     ],
     temperature=0.7,
-    max_tokens=512
+    max_tokens=512,
 )
 
 print(response.choices[0].message.content)`,
@@ -35,11 +38,11 @@ print(response.choices[0].message.content)`,
 
 const client = new OpenAI({
   apiKey: "sk-unch-your-key-here",
-  baseURL: "https://api.unchained.ai/v1",
+  baseURL: "${BASE_URL}",
 });
 
 const response = await client.chat.completions.create({
-  model: "your-model-slug",
+  model: "${MODEL}",
   messages: [
     { role: "user", content: "Hello, how are you?" }
   ],

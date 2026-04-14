@@ -1,5 +1,7 @@
 import CodeExample from "@/components/CodeExample";
 
+const BASE_URL = "https://llm.ai-vfx.com/api/v1";
+
 export default function DocsPage() {
   return (
     <div className="max-w-4xl mx-auto px-6 py-16">
@@ -7,9 +9,13 @@ export default function DocsPage() {
       <h1 className="text-3xl font-mono font-bold text-neutral-100 mb-2">
         API Documentation<span className="text-terminal-500 animate-blink">_</span>
       </h1>
-      <p className="text-sm font-mono text-surface-800 mb-12">
+      <p className="text-sm font-mono text-surface-800 mb-4">
         UnchainedAPI is fully compatible with the OpenAI Chat Completions API.
       </p>
+      <div className="border border-surface-400 bg-surface-100 p-4 mb-12 text-sm font-mono text-neutral-300">
+        <p className="text-xs uppercase tracking-[0.2em] text-surface-900 mb-1">// Base URL</p>
+        <code className="text-terminal-400">{BASE_URL}</code>
+      </div>
 
       {/* Quick Start */}
       <section className="mb-12">
@@ -41,6 +47,68 @@ export default function DocsPage() {
       <section className="mb-12">
         <p className="section-label mb-4">// Code Examples</p>
         <CodeExample />
+      </section>
+
+      {/* Connecting Agents */}
+      <section className="mb-12">
+        <p className="section-label mb-4">// Connecting Agents & Clients</p>
+        <p className="text-sm font-mono text-surface-800 mb-6">
+          UnchainedAPI speaks the OpenAI protocol, so any tool with an
+          &quot;OpenAI-compatible&quot; option works. Use the base URL and your
+          <code className="text-terminal-400 mx-1">sk-unch-</code> key from the dashboard.
+        </p>
+
+        <div className="space-y-6">
+          <div className="border border-surface-400 bg-surface-100 p-6">
+            <h3 className="text-neutral-100 font-mono font-bold mb-3">Cline / Continue.dev / Roo Code (VS Code)</h3>
+            <ol className="text-sm font-mono text-surface-900 space-y-1 list-decimal list-inside">
+              <li>Provider: <span className="text-terminal-400">OpenAI Compatible</span></li>
+              <li>Base URL: <code className="text-terminal-400">{BASE_URL}</code></li>
+              <li>API Key: <code className="text-terminal-400">sk-unch-...</code></li>
+              <li>Model ID: copy slug from <code className="text-terminal-400">/models</code></li>
+            </ol>
+          </div>
+
+          <div className="border border-surface-400 bg-surface-100 p-6">
+            <h3 className="text-neutral-100 font-mono font-bold mb-3">Cursor</h3>
+            <p className="text-sm font-mono text-surface-900 mb-2">
+              Settings → Models → OpenAI API Key → Override OpenAI Base URL
+            </p>
+            <pre className="bg-surface-0 border border-surface-400 p-3 text-sm text-neutral-300 font-mono overflow-x-auto">
+{`Base URL:  ${BASE_URL}
+API Key:   sk-unch-your-key-here
+Model:     <slug from /models>`}
+            </pre>
+          </div>
+
+          <div className="border border-surface-400 bg-surface-100 p-6">
+            <h3 className="text-neutral-100 font-mono font-bold mb-3">Open WebUI</h3>
+            <p className="text-sm font-mono text-surface-900 mb-2">
+              Settings → Connections → OpenAI API
+            </p>
+            <pre className="bg-surface-0 border border-surface-400 p-3 text-sm text-neutral-300 font-mono overflow-x-auto">
+{`API Base URL:  ${BASE_URL}
+API Key:       sk-unch-your-key-here`}
+            </pre>
+          </div>
+
+          <div className="border border-surface-400 bg-surface-100 p-6">
+            <h3 className="text-neutral-100 font-mono font-bold mb-3">LibreChat / BetterChatGPT / ChatBox / Jan / AnythingLLM</h3>
+            <p className="text-sm font-mono text-surface-900">
+              Pick the <span className="text-terminal-400">OpenAI</span> or
+              <span className="text-terminal-400"> Custom OpenAI</span> provider and plug in the same
+              base URL and key. No extra configuration required.
+            </p>
+          </div>
+
+          <div className="border border-surface-400 bg-surface-100 p-6">
+            <h3 className="text-neutral-100 font-mono font-bold mb-3">Environment variables (openai SDK, LangChain, LlamaIndex)</h3>
+            <pre className="bg-surface-0 border border-surface-400 p-3 text-sm text-neutral-300 font-mono overflow-x-auto">
+{`export OPENAI_API_KEY=sk-unch-your-key-here
+export OPENAI_BASE_URL=${BASE_URL}`}
+            </pre>
+          </div>
+        </div>
       </section>
 
       {/* Endpoints */}
