@@ -109,6 +109,18 @@ async def chat_completions(
 ):
     user, api_key = auth
 
+    import logging
+    log = logging.getLogger("uvicorn.error")
+    log.info(
+        "chat_completions: model=%s msgs=%d tools=%s tool_choice=%s max_tokens=%s stream=%s",
+        request.model,
+        len(request.messages),
+        len(request.tools) if request.tools else 0,
+        request.tool_choice,
+        request.max_tokens,
+        request.stream,
+    )
+
     # 1. Rate limit check
     allowed, retry_after = await check_rate_limit(str(api_key.id), user.tier)
     if not allowed:
