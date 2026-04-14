@@ -138,7 +138,9 @@ async def chat_completions(
     # tiktoken uses OpenAI BPE; real model tokenizers (Qwen, Llama, etc.) may
     # count slightly more tokens. Reserve a safety margin so the final
     # prompt+completion stays under max_ctx even if the estimate was low.
-    safety_margin = max(64, int(tokens_in_estimate * 0.05))
+    # Qwen/Llama tokenizers can be ~5-10% denser than tiktoken on structured
+    # content (JSON, system prompts, YAML). 10% margin avoids vLLM rejections.
+    safety_margin = max(256, int(tokens_in_estimate * 0.1))
     min_output = 16
     if tokens_in_estimate + safety_margin >= max_ctx - min_output:
         raise HTTPException(
