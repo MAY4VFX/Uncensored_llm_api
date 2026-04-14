@@ -35,20 +35,43 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
     stream=True is required for real-time token delivery (otherwise vLLM generates
     the entire response before returning, causing 60+ sec delays on thinking models).
     """
-    # Qwen3 ships with a thinking-mode chat template on by default which
-    # makes the model emit long <think>...</think> monologues before any
-    # actual answer. Most chat/agent clients (OpenClaude, Cline, Cursor)
-    # want a clean response, so we disable thinking by default.
+    messages_out: list[dict] = []
+    for m in request.messages:
+        item: dict = {"role": m.role, "content": m.content}
+        if m.name:
+            item["name"] = m.name
+        if m.tool_call_id:
+            item["tool_call_id"] = m.tool_call_id
+        if m.tool_calls:
+            item["tool_calls"] = m.tool_calls
+        messages_out.append(item)
+
     payload: dict = {
         "model": model.hf_repo,
-        "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        "messages": messages_out,
         "temperature": request.temperature,
         "max_tokens": request.max_tokens or 4096,
         "top_p": request.top_p,
         "stream": stream,
         "stop": request.stop,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
+
+    # Pass-through of OpenAI-compatible extensions so tool-calling agents
+    # (OpenClaude, Cline, Cursor, etc.) actually reach vLLM with their
+    # function definitions.
+    if request.tools:
+        payload["tools"] = request.tools
+    if request.tool_choice is not None:
+        payload["tool_choice"] = request.tool_choice
+    if request.response_format is not None:
+        payload["response_format"] = request.response_format
+    if request.seed is not None:
+        payload["seed"] = request.seed
+    if request.presence_penalty is not None:
+        payload["presence_penalty"] = request.presence_penalty
+    if request.frequency_penalty is not None:
+        payload["frequency_penalty"] = request.frequency_penalty
+
     return {"openai_route": "/v1/chat/completions", "openai_input": payload}
 
 
@@ -77,7 +100,11 @@ async def proxy_chat_completion(
         choices.append(
             Choice(
                 index=i,
-                message=ChatMessage(role=msg.get("role", "assistant"), content=msg.get("content", "")),
+                message=ChatMessage(
+                    role=msg.get("role", "assistant"),
+                    content=msg.get("content") or "",
+                    tool_calls=msg.get("tool_calls") or None,
+                ),
                 finish_reason=c.get("finish_reason"),
             )
         )

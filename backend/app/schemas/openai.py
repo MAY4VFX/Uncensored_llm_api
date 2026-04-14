@@ -1,11 +1,16 @@
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     role: str
-    content: str
+    content: str = ""
+    name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[dict] | None = None
 
     @field_validator("content", mode="before")
     @classmethod
@@ -27,6 +32,8 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     model: str
     messages: list[ChatMessage]
     temperature: float = 1.0
@@ -34,6 +41,14 @@ class ChatCompletionRequest(BaseModel):
     top_p: float = 1.0
     stream: bool = False
     stop: str | list[str] | None = None
+    tools: list[dict] | None = None
+    tool_choice: str | dict | None = None
+    response_format: dict | None = None
+    seed: int | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    logit_bias: dict | None = None
+    user: str | None = None
 
 
 class Choice(BaseModel):
@@ -60,6 +75,7 @@ class ChatCompletionResponse(BaseModel):
 class DeltaMessage(BaseModel):
     role: str | None = None
     content: str | None = None
+    tool_calls: list[dict] | None = None
 
 
 class StreamChoice(BaseModel):
