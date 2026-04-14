@@ -35,18 +35,21 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
     stream=True is required for real-time token delivery (otherwise vLLM generates
     the entire response before returning, causing 60+ sec delays on thinking models).
     """
-    return {
-        "openai_route": "/v1/chat/completions",
-        "openai_input": {
-            "model": model.hf_repo,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens or 4096,
-            "top_p": request.top_p,
-            "stream": stream,
-            "stop": request.stop,
-        },
+    # Qwen3 ships with a thinking-mode chat template on by default which
+    # makes the model emit long <think>...</think> monologues before any
+    # actual answer. Most chat/agent clients (OpenClaude, Cline, Cursor)
+    # want a clean response, so we disable thinking by default.
+    payload: dict = {
+        "model": model.hf_repo,
+        "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens or 4096,
+        "top_p": request.top_p,
+        "stream": stream,
+        "stop": request.stop,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
+    return {"openai_route": "/v1/chat/completions", "openai_input": payload}
 
 
 async def proxy_chat_completion(

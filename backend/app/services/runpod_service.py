@@ -280,9 +280,6 @@ async def create_endpoint(
             # OpenClaude, Cline and Cursor can use Qwen3/Hermes tool protocol.
             {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
             {"key": "TOOL_CALL_PARSER", "value": "hermes"},
-            # Strip <think>...</think> reasoning blocks into message.reasoning_content
-            # so clients see a clean final answer in message.content (Qwen3/DeepSeek-R1 style).
-            {"key": "REASONING_PARSER", "value": "deepseek_r1"},
         ]
 
     if settings.hf_token:
