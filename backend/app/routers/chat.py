@@ -135,8 +135,18 @@ async def chat_completions(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
 
-    # Cap max_tokens so prompt + completion fits within context window
-    max_possible_output = max(1, max_ctx - tokens_in_estimate)
+    # Reserve at least 16 tokens for output, otherwise reject with 400
+    min_output = 16
+    if tokens_in_estimate >= max_ctx - min_output:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Prompt too long: {tokens_in_estimate} input tokens, "
+                f"model context is {max_ctx}. Reduce prompt or pick a model with larger context."
+            ),
+        )
+
+    max_possible_output = max_ctx - tokens_in_estimate
     if request.max_tokens:
         request.max_tokens = min(request.max_tokens, max_possible_output)
     else:
