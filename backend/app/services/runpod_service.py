@@ -276,6 +276,10 @@ async def create_endpoint(
             {"key": "MODEL_NAME", "value": model_name},
             {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
             {"key": "TRUST_REMOTE_CODE", "value": "1"},
+            # Enable OpenAI-style function/tool calling so clients like
+            # OpenClaude, Cline and Cursor can use Qwen3/Hermes tool protocol.
+            {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
+            {"key": "TOOL_CALL_PARSER", "value": "hermes"},
         ]
 
     if settings.hf_token:
