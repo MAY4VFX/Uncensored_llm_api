@@ -36,7 +36,8 @@ GPU_TIERS = [
     ("RTX_4000_Ada_20GB", 20, ["AMPERE_16"]),
     ("RTX_A5000_24GB", 24, ["ADA_24", "AMPERE_24"]),
     ("A100_80GB", 80, ["AMPERE_80", "ADA_80_PRO"]),
-    ("H100_80GB", 80, ["HOPPER_80"]),
+    # RunPod does not expose a separate H100 80 pool id; use HOPPER_141 for Hopper-tier fallback
+    ("H100_80GB", 80, ["HOPPER_141"]),
     ("H200_141GB", 141, ["HOPPER_141"]),
 ]
 
