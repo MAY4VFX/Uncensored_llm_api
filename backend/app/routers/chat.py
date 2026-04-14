@@ -109,17 +109,6 @@ async def chat_completions(
 ):
     user, api_key = auth
 
-    import logging
-    log = logging.getLogger("uvicorn.error")
-    log.info(
-        "chat_completions: model=%s msgs=%d tools=%s tool_choice=%s max_tokens=%s stream=%s",
-        request.model,
-        len(request.messages),
-        len(request.tools) if request.tools else 0,
-        request.tool_choice,
-        request.max_tokens,
-        request.stream,
-    )
 
     # 1. Rate limit check
     allowed, retry_after = await check_rate_limit(str(api_key.id), user.tier)
@@ -143,13 +132,19 @@ async def chat_completions(
 
     # 2b. Validate max_tokens against model context limit
     max_ctx = model.max_context_length or 4096
+    import json as _json
     tokens_in_estimate = count_message_tokens(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
+    # Tools definitions are injected into the prompt by vLLM's chat template,
+    # so they also consume input tokens. Approximate by counting the JSON
+    # serialization of the tools list as a pseudo-message.
+    if request.tools:
+        tools_tokens = count_message_tokens(
+            [{"role": "system", "content": _json.dumps(request.tools)}]
+        )
+        tokens_in_estimate += tools_tokens
 
-    # tiktoken uses OpenAI BPE; real model tokenizers (Qwen, Llama, etc.) may
-    # count slightly more tokens. Reserve a safety margin so the final
-    # prompt+completion stays under max_ctx even if the estimate was low.
     # Qwen/Llama tokenizers can be ~5-10% denser than tiktoken on structured
     # content (JSON, system prompts, YAML). 10% margin avoids vLLM rejections.
     safety_margin = max(256, int(tokens_in_estimate * 0.1))
@@ -164,10 +159,14 @@ async def chat_completions(
         )
 
     max_possible_output = max_ctx - tokens_in_estimate - safety_margin
+    # Default cap when client doesn't specify max_tokens — don't reserve
+    # the entire remaining context for output, vLLM validates input+output
+    # against max_model_len and rejects if the estimate was low by 1 token.
+    default_output = min(8192, max_possible_output)
     if request.max_tokens:
         request.max_tokens = min(request.max_tokens, max_possible_output)
     else:
-        request.max_tokens = max_possible_output
+        request.max_tokens = default_output
 
     # 3. Pre-auth: estimate max GPU cost and check credits
     gpu_hourly = float(model.gpu_hourly_cost or 0)
