@@ -135,18 +135,21 @@ async def chat_completions(
         [{"role": m.role, "content": m.content} for m in request.messages]
     )
 
-    # Reserve at least 16 tokens for output, otherwise reject with 400
+    # tiktoken uses OpenAI BPE; real model tokenizers (Qwen, Llama, etc.) may
+    # count slightly more tokens. Reserve a safety margin so the final
+    # prompt+completion stays under max_ctx even if the estimate was low.
+    safety_margin = max(64, int(tokens_in_estimate * 0.05))
     min_output = 16
-    if tokens_in_estimate >= max_ctx - min_output:
+    if tokens_in_estimate + safety_margin >= max_ctx - min_output:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Prompt too long: {tokens_in_estimate} input tokens, "
+                f"Prompt too long: ~{tokens_in_estimate} input tokens, "
                 f"model context is {max_ctx}. Reduce prompt or pick a model with larger context."
             ),
         )
 
-    max_possible_output = max_ctx - tokens_in_estimate
+    max_possible_output = max_ctx - tokens_in_estimate - safety_margin
     if request.max_tokens:
         request.max_tokens = min(request.max_tokens, max_possible_output)
     else:
