@@ -55,6 +55,11 @@ async def deploy_endpoint(
             "env": [
                 {"key": "MODEL_NAME", "value": hf_repo},
                 {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
+                {"key": "GENERATION_CONFIG", "value": "vllm"},
+                {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
+                {"key": "TOOL_CALL_PARSER", "value": "qwen3_xml" if "qwen3" in hf_repo.lower() and "coder" in hf_repo.lower() else "hermes"},
+                {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
+                {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
             ],
         }
     }

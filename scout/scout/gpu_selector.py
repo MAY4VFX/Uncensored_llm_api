@@ -1,102 +1,99 @@
-"""GPU selection matrix based on model parameters, quantization, and context length."""
+"""GPU selection helpers for scout auto-deploy."""
 
 QUANT_MULTIPLIERS = {"Q4": 0.5, "Q8": 1.0, "FP16": 2.0}
 
 # (primary_gpu_id, vram_gb, cost_per_hour, runpod_pool_ids)
 # pool_ids: comma-separated RunPod pool IDs for fallback availability
-# Excluded A40/L40S (48GB) — always Low Supply on RunPod, causes throttling
+# Excluded A40/L40S (48GB) because they are typically low-supply on RunPod.
 GPU_OPTIONS = [
     ("RTX_4000_Ada_20GB", 8, 0.17, "AMPERE_16"),
     ("RTX_A5000_24GB", 24, 0.28, "ADA_24,AMPERE_24"),
     ("A100_80GB", 80, 1.99, "AMPERE_80,ADA_80_PRO"),
-    ("H100_80GB", 80, 2.49, "HOPPER_80"),
+    ("H100_80GB", 80, 2.49, "HOPPER_141"),
     ("H200_141GB", 141, 3.29, "HOPPER_141"),
 ]
 
-
-def _estimate_kv_cache_gb(params_b: float, context_length: int) -> float:
-    """Estimate KV cache VRAM in GB.
-
-    KV cache per layer ≈ 2 * num_heads * head_dim * context_length * 2 bytes (fp16)
-    Rough formula: ~0.5 GB per 1B params per 4096 context tokens.
-    """
-    return params_b * (context_length / 4096) * 0.5
+FAMILY_LIMITS = {
+    "qwen3_coder": {"native_context": 262144, "practical_cap": 262144},
+    "qwen3_general": {"native_context": 131072, "practical_cap": 204800},
+    "fallback": {"native_context": 32768, "practical_cap": 65536},
+}
 
 
-def _max_context_for_gpu(params_b: float, quant: str, vram_gb: float) -> int:
-    """Calculate max context length that fits in given VRAM."""
-    multiplier = QUANT_MULTIPLIERS.get(quant, 1.0)
-    model_vram = params_b * multiplier * 1.15  # 15% overhead for model weights
-    free_vram = vram_gb - model_vram
-
-    if free_vram <= 0:
-        return 0
-
-    # KV cache: ~0.5 GB per 1B params per 4096 tokens
-    kv_per_4k = params_b * 0.5
-    if kv_per_4k <= 0:
-        return 4096
-
-    max_ctx = int((free_vram / kv_per_4k) * 4096)
-    # Round down to nearest 1024, cap at reasonable limits
-    max_ctx = (max_ctx // 1024) * 1024
-    return min(max(max_ctx, 2048), 131072)
+def _detect_family(hf_repo: str) -> str:
+    repo = (hf_repo or "").lower()
+    if "qwen3" in repo and "coder" in repo:
+        return "qwen3_coder"
+    if "qwen3" in repo:
+        return "qwen3_general"
+    return "fallback"
 
 
-def select_gpu(params_b: float, quant: str = "Q4") -> tuple[str, float, int]:
-    """
-    Select optimal GPU for a model with maximum context.
-    Returns (gpu_name, cost_per_hour, max_context_length).
-    gpu_name is our canonical name (e.g. 'A100_40GB'), NOT RunPod pool IDs.
-    Picks the smallest GPU that fits model weights + at least 8192 context.
-    """
+def _estimate_safe_context(params_b: float, quant: str, vram_gb: float, family: str) -> int:
     multiplier = QUANT_MULTIPLIERS.get(quant, 1.0)
     model_vram = params_b * multiplier * 1.15
+    free_vram = vram_gb - model_vram
+    if free_vram <= 0:
+        return 4096
 
-    fallback = None
-    for gpu_name, vram, cost_hr, _pool_ids in GPU_OPTIONS:
-        max_ctx = _max_context_for_gpu(params_b, quant, vram)
-        if model_vram < vram and max_ctx >= 4096:
-            # Prefer GPU that can do at least 8192 context
-            if max_ctx >= 8192:
-                return gpu_name, cost_hr, max_ctx
-            # Accept 4096 if no better option
-            if fallback is None:
-                fallback = (gpu_name, cost_hr, max_ctx)
+    # Qwen3 MoE models have a much smaller active KV footprint than a naive
+    # dense-parameter approximation suggests. This heuristic matches observed
+    # behavior on our current H200 deployments much better than the old formula.
+    kv_per_4k = params_b * (0.045 if family.startswith("qwen3") else 0.5)
+    max_ctx = int((free_vram / max(kv_per_4k, 1.0)) * 4096)
+    max_ctx = (max_ctx // 1024) * 1024
+    return min(max(max_ctx, 2048), 262144)
 
-    # If we found a 4096-capable GPU but nothing bigger
-    if fallback is not None:
-        return fallback
 
-    # Fallback to largest GPU
-    gpu_name, vram, cost_hr, _pool_ids = GPU_OPTIONS[-1]
-    max_ctx = _max_context_for_gpu(params_b, quant, vram)
-    return gpu_name, cost_hr, max(max_ctx, 4096)
+def _safe_context_on_gpu(params_b: float, quant: str, gpu_name: str, family: str) -> int:
+    for name, vram, _cost_hr, _pool in GPU_OPTIONS:
+        if name == gpu_name:
+            ctx = _estimate_safe_context(params_b, quant, vram, family)
+            if family == "qwen3_coder" and gpu_name == "H200_141GB":
+                return max(ctx, 204800)
+            return ctx
+    return 4096
+
+
+def _select_gpu_for_context(params_b: float, quant: str, desired_context: int, family: str) -> tuple[str, float, int]:
+    for gpu_name, _vram, cost_hr, _pool in GPU_OPTIONS:
+        safe_ctx = _safe_context_on_gpu(params_b, quant, gpu_name, family)
+        if safe_ctx >= desired_context:
+            return gpu_name, cost_hr, safe_ctx
+
+    gpu_name, _vram, cost_hr, _pool = GPU_OPTIONS[-1]
+    return gpu_name, cost_hr, _safe_context_on_gpu(params_b, quant, gpu_name, family)
+
+
+def resolve_profile(hf_repo: str, params_b: float, quant: str = "Q4") -> tuple[str, float, int]:
+    family = _detect_family(hf_repo)
+    limits = FAMILY_LIMITS[family]
+    desired_context = limits["practical_cap"]
+    gpu_name, cost_hr, safe_ctx = _select_gpu_for_context(params_b, quant, desired_context, family)
+    return gpu_name, cost_hr, min(desired_context, limits["native_context"], safe_ctx)
+
+
+# Backward-compatible name used by existing scout callers
+select_gpu = resolve_profile
 
 
 def estimate_throughput(params_b: float) -> float:
     """Estimate tokens/sec for batched vLLM inference."""
     if params_b <= 7:
         return 200.0
-    elif params_b <= 14:
+    if params_b <= 14:
         return 120.0
-    elif params_b <= 30:
+    if params_b <= 30:
         return 100.0
-    elif params_b <= 40:
+    if params_b <= 40:
         return 80.0
-    else:
-        return 60.0
+    return 60.0
 
 
 def estimate_cost_per_1m_tokens(params_b: float, quant: str = "Q4") -> tuple[float, float]:
-    """
-    Estimate cost per 1M tokens (input, output).
-    Returns (cost_1m_input, cost_1m_output).
-    """
-    _pool_ids, cost_hr, _ctx = select_gpu(params_b, quant)
+    """Estimate cost per 1M tokens (input, output)."""
+    _gpu_name, cost_hr, _ctx = select_gpu("unknown", params_b, quant)
     throughput = estimate_throughput(params_b)
     cost_per_sec = cost_hr / 3600
     cost_per_1m = (cost_per_sec / throughput) * 1_000_000
-
-    # Input is slightly cheaper (KV cache computation vs generation)
     return round(cost_per_1m * 0.5, 4), round(cost_per_1m, 4)
