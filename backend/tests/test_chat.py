@@ -5,6 +5,8 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.llm_model import LlmModel
+from app.schemas.openai import ChatCompletionRequest, ChatMessage
+from app.services.proxy_service import _build_vllm_payload
 
 
 @pytest.mark.asyncio
@@ -123,3 +125,96 @@ async def test_redeploy_marks_model_inactive_on_create_failure(client: AsyncClie
     await db_session.refresh(model)
     assert model.status == "inactive"
     assert model.runpod_endpoint_id is None
+
+
+@pytest.mark.asyncio
+async def test_build_vllm_payload_merges_model_prompt_and_client_system():
+    model = LlmModel(
+        id=uuid.uuid4(),
+        slug="test-model",
+        display_name="Test Model",
+        hf_repo="test/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        system_prompt="Always answer in the user's language.",
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[
+            ChatMessage(role="system", content="Be concise."),
+            ChatMessage(role="user", content="Привет"),
+        ],
+    )
+
+    payload = _build_vllm_payload(request, model)
+    messages = payload["openai_input"]["messages"]
+
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "Always answer in the user's language.\n\n---\n\nBe concise."
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"] == "Привет"
+
+
+@pytest.mark.asyncio
+async def test_build_vllm_payload_injects_model_prompt_when_client_has_no_system():
+    model = LlmModel(
+        id=uuid.uuid4(),
+        slug="test-model",
+        display_name="Test Model",
+        hf_repo="test/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        system_prompt="Reply in the same language as the user.",
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[ChatMessage(role="user", content="Hello")],
+    )
+
+    payload = _build_vllm_payload(request, model)
+    messages = payload["openai_input"]["messages"]
+
+    assert messages[0] == {
+        "role": "system",
+        "content": "Reply in the same language as the user.",
+    }
+    assert messages[1]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_model_system_prompt(client: AsyncClient, admin_headers, db_session):
+    model = LlmModel(
+        id=uuid.uuid4(),
+        slug="prompt-model",
+        display_name="Prompt Model",
+        hf_repo="prompt/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="inactive",
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    db_session.add(model)
+    await db_session.commit()
+
+    response = await client.patch(
+        f"/admin/models/{model.id}",
+        headers=admin_headers,
+        json={"system_prompt": "Always answer in Russian."},
+    )
+
+    assert response.status_code == 200
+    await db_session.refresh(model)
+    assert model.system_prompt == "Always answer in Russian."
