@@ -238,13 +238,30 @@ async def deploy_model(
     await db.commit()
 
     try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(f"https://huggingface.co/api/models/{model.hf_repo}")
+            resp.raise_for_status()
+            metadata = resp.json()
+
+        profile = resolve_deploy_profile(
+            metadata,
+            params_b=float(model.params_b or 0),
+            quantization=model.quantization,
+        )
+        model.gpu_type = profile["gpu_type"]
+        model.gpu_count = profile["gpu_count"]
+        model.max_context_length = profile["target_context"]
+
         result = await create_endpoint(
             name=f"unch-{model.slug}",
-            gpu_type=model.gpu_type,
+            gpu_type=profile["gpu_type"],
             model_name=model.hf_repo,
             params_b=float(model.params_b or 0),
-            max_model_len=model.max_context_length or 4096,
-            gpu_count=model.gpu_count or 1,
+            max_model_len=profile["target_context"],
+            gpu_count=profile["gpu_count"],
+            tool_parser=profile["tool_parser"],
+            generation_config_mode=profile["generation_config_mode"],
+            default_temperature=profile["default_temperature"],
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
@@ -273,6 +290,20 @@ async def redeploy_model(
     await db.commit()
 
     try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(f"https://huggingface.co/api/models/{model.hf_repo}")
+            resp.raise_for_status()
+            metadata = resp.json()
+
+        profile = resolve_deploy_profile(
+            metadata,
+            params_b=float(model.params_b or 0),
+            quantization=model.quantization,
+        )
+        model.gpu_type = profile["gpu_type"]
+        model.gpu_count = profile["gpu_count"]
+        model.max_context_length = profile["target_context"]
+
         if model.runpod_endpoint_id:
             await delete_endpoint(model.runpod_endpoint_id)
             model.runpod_endpoint_id = None
@@ -280,11 +311,14 @@ async def redeploy_model(
 
         result = await create_endpoint(
             name=f"unch-{model.slug}",
-            gpu_type=model.gpu_type,
+            gpu_type=profile["gpu_type"],
             model_name=model.hf_repo,
             params_b=float(model.params_b or 0),
-            max_model_len=model.max_context_length or 4096,
-            gpu_count=model.gpu_count or 1,
+            max_model_len=profile["target_context"],
+            gpu_count=profile["gpu_count"],
+            tool_parser=profile["tool_parser"],
+            generation_config_mode=profile["generation_config_mode"],
+            default_temperature=profile["default_temperature"],
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})

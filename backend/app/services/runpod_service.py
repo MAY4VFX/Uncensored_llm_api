@@ -239,6 +239,9 @@ async def create_endpoint(
     params_b: float = 0,
     max_model_len: int = 4096,
     gpu_count: int = 1,
+    tool_parser: str | None = None,
+    generation_config_mode: str | None = None,
+    default_temperature: float | None = None,
     db=None,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
@@ -276,17 +279,16 @@ async def create_endpoint(
             {"key": "MODEL_NAME", "value": model_name},
             {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
             {"key": "TRUST_REMOTE_CODE", "value": "1"},
-            {"key": "GENERATION_CONFIG", "value": "vllm"},
+            {"key": "GENERATION_CONFIG", "value": generation_config_mode or "vllm"},
             # Enable OpenAI-style function/tool calling so clients like
-            # OpenClaude, Cline and Cursor can use Qwen3/Hermes tool protocol.
+            # OpenClaude, Cline and Cursor can use model-family-specific tool protocols.
             {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
-            {"key": "TOOL_CALL_PARSER", "value": "hermes"},
-            # Prefix caching keeps the KV cache of repeated system prompts
-            # (OpenClaude skills + CLAUDE.md) on the GPU between requests,
-            # giving 2-5x speedup on long agent sessions.
+            {"key": "TOOL_CALL_PARSER", "value": tool_parser or "hermes"},
             {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
             {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
         ]
+        if default_temperature is not None:
+            env_vars.append({"key": "DEFAULT_TEMPERATURE", "value": str(default_temperature)})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})

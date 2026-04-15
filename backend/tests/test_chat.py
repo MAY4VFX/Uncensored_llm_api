@@ -110,16 +110,53 @@ async def test_admin_can_redeploy_active_model(client: AsyncClient, admin_header
     db_session.add(model)
     await db_session.commit()
 
+    fake_hf = {
+        "id": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated",
+        "tags": [
+            "qwen3_moe",
+            "abliterated",
+            "uncensored",
+            "base_model:Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        ],
+        "siblings": [{"rfilename": "config.json"}],
+        "cardData": {"base_model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct"]},
+    }
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return fake_hf
+
+    async def fake_get(*args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr("app.routers.admin.httpx.AsyncClient.get", fake_get)
     monkeypatch.setattr("app.routers.admin.delete_endpoint", AsyncMock())
-    monkeypatch.setattr(
-        "app.routers.admin.create_endpoint",
-        AsyncMock(return_value={"data": {"saveEndpoint": {"id": "new-endpoint"}}}),
-    )
+    mocked_create = AsyncMock(return_value={"data": {"saveEndpoint": {"id": "new-endpoint"}}})
+    monkeypatch.setattr("app.routers.admin.create_endpoint", mocked_create)
 
     response = await client.post(f"/admin/models/{model.id}/redeploy", headers=admin_headers)
 
     assert response.status_code == 200
     assert response.json() == {"detail": "Model redeployed", "endpoint_id": "new-endpoint"}
+    kwargs = mocked_create.await_args.kwargs
+    assert kwargs["gpu_type"] == "H200_141GB"
+    assert kwargs["max_model_len"] >= 131072
+    assert kwargs["tool_parser"] == "qwen3_xml"
+    assert kwargs["generation_config_mode"] == "vllm"
+    assert kwargs["default_temperature"] <= 0.2
+
+    await db_session.refresh(model)
+    assert model.gpu_type == "H200_141GB"
+    assert model.max_context_length >= 131072
+
+    await db_session.refresh(model)
+    assert model.runpod_endpoint_id == "new-endpoint"
+    assert model.status == "active"
 
     await db_session.refresh(model)
     assert model.runpod_endpoint_id == "new-endpoint"
@@ -157,6 +194,31 @@ async def test_redeploy_marks_model_inactive_on_create_failure(client: AsyncClie
     db_session.add(model)
     await db_session.commit()
 
+    fake_hf = {
+        "id": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated",
+        "tags": [
+            "qwen3_moe",
+            "abliterated",
+            "uncensored",
+            "base_model:Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        ],
+        "siblings": [{"rfilename": "config.json"}],
+        "cardData": {"base_model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct"]},
+    }
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return fake_hf
+
+    async def fake_get(*args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr("app.routers.admin.httpx.AsyncClient.get", fake_get)
     monkeypatch.setattr("app.routers.admin.delete_endpoint", AsyncMock())
     monkeypatch.setattr("app.routers.admin.create_endpoint", AsyncMock(side_effect=RuntimeError("boom")))
 
