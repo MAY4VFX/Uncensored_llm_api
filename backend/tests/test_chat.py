@@ -52,12 +52,6 @@ async def test_add_model_from_hf_uses_resolved_deploy_profile(client: AsyncClien
     assert body["max_context_length"] >= 131072
 
 
-
-
-@pytest.mark.asyncio
-async def test_list_models(client: AsyncClient):
-
-
 @pytest.mark.asyncio
 async def test_list_models(client: AsyncClient):
     resp = await client.get("/v1/models")
