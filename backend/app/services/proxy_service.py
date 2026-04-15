@@ -75,7 +75,6 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
         "top_p": request.top_p,
         "stream": stream,
         "stop": request.stop,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
 
     # Pass-through of OpenAI-compatible extensions so tool-calling agents
