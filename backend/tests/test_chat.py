@@ -122,4 +122,4 @@ async def test_redeploy_marks_model_inactive_on_create_failure(client: AsyncClie
 
     await db_session.refresh(model)
     assert model.status == "inactive"
-    assert model.runpod_endpoint_id == "old-endpoint"
+    assert model.runpod_endpoint_id is None

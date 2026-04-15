@@ -235,6 +235,46 @@ async def deploy_model(
     return {"detail": "Model deployed", "endpoint_id": model.runpod_endpoint_id}
 
 
+@router.post("/models/{model_id}/redeploy")
+async def redeploy_model(
+    model_id: uuid.UUID,
+    _: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    model = await db.get(LlmModel, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    model.status = "deploying"
+    await db.commit()
+
+    try:
+        if model.runpod_endpoint_id:
+            await delete_endpoint(model.runpod_endpoint_id)
+            model.runpod_endpoint_id = None
+            await db.commit()
+
+        result = await create_endpoint(
+            name=f"unch-{model.slug}",
+            gpu_type=model.gpu_type,
+            model_name=model.hf_repo,
+            params_b=float(model.params_b or 0),
+            max_model_len=model.max_context_length or 4096,
+            gpu_count=model.gpu_count or 1,
+            db=db,
+        )
+        endpoint_data = result.get("data", {}).get("saveEndpoint", {})
+        model.runpod_endpoint_id = endpoint_data.get("id")
+        model.status = "active"
+    except Exception as e:
+        model.status = "inactive"
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"Deployment failed: {e}")
+
+    await db.commit()
+    return {"detail": "Model redeployed", "endpoint_id": model.runpod_endpoint_id}
+
+
 @router.post("/models/{model_id}/status")
 async def update_model_status(
     model_id: uuid.UUID,
