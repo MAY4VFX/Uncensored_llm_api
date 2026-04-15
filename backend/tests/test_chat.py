@@ -10,6 +10,55 @@ from app.services.proxy_service import _build_vllm_payload
 
 
 @pytest.mark.asyncio
+async def test_add_model_from_hf_uses_resolved_deploy_profile(client: AsyncClient, admin_headers, monkeypatch):
+    fake_hf = {
+        "id": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated",
+        "tags": [
+            "qwen3_moe",
+            "abliterated",
+            "uncensored",
+            "base_model:Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        ],
+        "siblings": [{"rfilename": "config.json"}],
+        "cardData": {"base_model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct"]},
+        "downloads": 100,
+        "likes": 10,
+        "safetensors": {"total": 30_500_000_000},
+    }
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return fake_hf
+
+    async def fake_get(*args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr("app.routers.admin.httpx.AsyncClient.get", fake_get)
+
+    response = await client.post(
+        "/admin/models/add-from-hf",
+        headers=admin_headers,
+        json={"hf_repo": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["gpu_type"] == "H200_141GB"
+    assert body["max_context_length"] >= 131072
+
+
+
+
+@pytest.mark.asyncio
+async def test_list_models(client: AsyncClient):
+
+
+@pytest.mark.asyncio
 async def test_list_models(client: AsyncClient):
     resp = await client.get("/v1/models")
     assert resp.status_code == 200
