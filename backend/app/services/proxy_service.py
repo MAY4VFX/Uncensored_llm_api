@@ -27,6 +27,36 @@ def _status_message(status: str) -> str:
     return messages.get(status, "Preparing worker...")
 
 
+def _merge_system_prompts(model_prompt: str | None, messages: list[ChatMessage]) -> list[dict]:
+    client_system_parts: list[str] = []
+    non_system_messages: list[dict] = []
+
+    for m in messages:
+        if m.role == "system":
+            if m.content:
+                client_system_parts.append(m.content)
+            continue
+
+        item: dict = {"role": m.role, "content": m.content}
+        if m.name:
+            item["name"] = m.name
+        if m.tool_call_id:
+            item["tool_call_id"] = m.tool_call_id
+        if m.tool_calls:
+            item["tool_calls"] = m.tool_calls
+        non_system_messages.append(item)
+
+    merged_parts: list[str] = []
+    if model_prompt:
+        merged_parts.append(model_prompt)
+    if client_system_parts:
+        merged_parts.append("\n\n---\n\n".join(client_system_parts))
+
+    if merged_parts:
+        return [{"role": "system", "content": "\n\n---\n\n".join(merged_parts)}, *non_system_messages]
+    return non_system_messages
+
+
 def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream: bool = False) -> dict:
     """Transform OpenAI-format request into vLLM-compatible RunPod payload.
 
@@ -35,16 +65,7 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
     stream=True is required for real-time token delivery (otherwise vLLM generates
     the entire response before returning, causing 60+ sec delays on thinking models).
     """
-    messages_out: list[dict] = []
-    for m in request.messages:
-        item: dict = {"role": m.role, "content": m.content}
-        if m.name:
-            item["name"] = m.name
-        if m.tool_call_id:
-            item["tool_call_id"] = m.tool_call_id
-        if m.tool_calls:
-            item["tool_calls"] = m.tool_calls
-        messages_out.append(item)
+    messages_out = _merge_system_prompts(model.system_prompt, request.messages)
 
     payload: dict = {
         "model": model.hf_repo,
