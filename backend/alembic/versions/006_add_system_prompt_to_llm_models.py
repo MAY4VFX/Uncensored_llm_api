@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "006_add_system_prompt_to_llm_models"
-down_revision = "005_add_gpu_time_billing"
+down_revision = "005"
 branch_labels = None
 depends_on = None
 
