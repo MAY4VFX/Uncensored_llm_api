@@ -10,7 +10,7 @@ from app.database import get_db
 from app.dependencies import get_admin_user
 from app.models.llm_model import LlmModel
 from app.models.user import User
-from app.schemas.model import AddFromHfRequest, CreateModelRequest, ModelResponse, UpdateModelStatusRequest
+from app.schemas.model import AddFromHfRequest, CreateModelRequest, ModelResponse, UpdateModelRequest, UpdateModelStatusRequest
 from app.services.runpod_service import create_endpoint, delete_endpoint
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -192,6 +192,26 @@ async def add_model_from_hf(
         status="pending",
     )
     db.add(model)
+    await db.commit()
+    await db.refresh(model)
+    return model
+
+
+@router.patch("/models/{model_id}", response_model=ModelResponse)
+async def update_model(
+    model_id: uuid.UUID,
+    request: UpdateModelRequest,
+    _: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    model = await db.get(LlmModel, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    updates = request.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(model, field, value)
+
     await db.commit()
     await db.refresh(model)
     return model
