@@ -17,6 +17,7 @@ class ModelResponse(BaseModel):
     cost_per_1m_input: float
     cost_per_1m_output: float
     description: str | None
+    system_prompt: str | None = None
     hf_downloads: int | None = None
     hf_likes: int | None = None
     created_at: datetime
@@ -37,6 +38,15 @@ class CreateModelRequest(BaseModel):
 
 class AddFromHfRequest(BaseModel):
     hf_repo: str
+
+
+class UpdateModelRequest(BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    gpu_type: str | None = None
+    gpu_count: int | None = None
+    max_context_length: int | None = None
+    system_prompt: str | None = None
 
 
 class UpdateModelStatusRequest(BaseModel):

@@ -32,6 +32,7 @@ class LlmModel(Base):
     keep_warm_price: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0.0)
     margin_multiplier: Mapped[float] = mapped_column(nullable=False, default=1.5)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     hf_downloads: Mapped[int | None] = mapped_column(nullable=True)
     hf_likes: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
