@@ -13,6 +13,7 @@ class ModelResponse(BaseModel):
     quantization: str
     gpu_type: str
     gpu_count: int = 1
+    max_context_length: int
     status: str
     cost_per_1m_input: float
     cost_per_1m_output: float

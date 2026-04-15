@@ -11,6 +11,7 @@ from app.dependencies import get_admin_user
 from app.models.llm_model import LlmModel
 from app.models.user import User
 from app.schemas.model import AddFromHfRequest, CreateModelRequest, ModelResponse, UpdateModelRequest, UpdateModelStatusRequest
+from app.services.deploy_profile_service import resolve_deploy_profile
 from app.services.runpod_service import create_endpoint, delete_endpoint
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -167,7 +168,9 @@ async def add_model_from_hf(
         raise HTTPException(status_code=400, detail="Could not determine model size. Add manually with params_b.")
 
     quant = _determine_quant(data)
-    gpu_type, gpu_count = select_gpu(params_b, quant)
+    profile = resolve_deploy_profile(data, params_b=params_b, quantization=quant)
+    gpu_type = profile["gpu_type"]
+    gpu_count = profile["gpu_count"]
     cost_input, cost_output = _estimate_cost(params_b, quant)
     slug = _slugify(hf_repo)
 
@@ -184,6 +187,7 @@ async def add_model_from_hf(
         quantization=quant,
         gpu_type=gpu_type,
         gpu_count=gpu_count,
+        max_context_length=profile["target_context"],
         cost_per_1m_input=cost_input,
         cost_per_1m_output=cost_output,
         description=data.get("cardData", {}).get("description") if data.get("cardData") else None,
