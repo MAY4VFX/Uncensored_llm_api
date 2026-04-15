@@ -280,6 +280,11 @@ async def create_endpoint(
             # OpenClaude, Cline and Cursor can use Qwen3/Hermes tool protocol.
             {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
             {"key": "TOOL_CALL_PARSER", "value": "hermes"},
+            # Prefix caching keeps the KV cache of repeated system prompts
+            # (OpenClaude skills + CLAUDE.md) on the GPU between requests,
+            # giving 2-5x speedup on long agent sessions.
+            {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
+            {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
         ]
 
     if settings.hf_token:
