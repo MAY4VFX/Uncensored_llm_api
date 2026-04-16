@@ -3,9 +3,371 @@ import json
 import pytest
 
 from app.models.llm_model import LlmModel
-from app.schemas.openai import ChatCompletionRequest, ChatMessage
+from app.schemas.openai import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
 from app.services import proxy_service
 
+
+@pytest.mark.asyncio
+async def test_nonstream_tool_calls_force_finish_reason_tool_calls(monkeypatch):
+    model = LlmModel(
+        slug="test-model",
+        display_name="Test Model",
+        hf_repo="test/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        runpod_endpoint_id="endpoint-1",
+        max_context_length=4096,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[ChatMessage(role="user", content="Hello")],
+        stream=False,
+    )
+
+    async def fake_run_inference(endpoint_id, payload):
+        return {
+            "output": [{
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "Bash", "arguments": "{\"command\":\"pwd\"}"}
+                        }]
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+            }]
+        }
+
+    monkeypatch.setattr("app.services.runpod_service.run_inference", fake_run_inference)
+
+    response = await proxy_service.proxy_chat_completion(request, model)
+    assert isinstance(response, ChatCompletionResponse)
+    assert response.choices[0].message.tool_calls is not None
+    assert response.choices[0].finish_reason == "tool_calls"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from app.services import proxy_service
 
 @pytest.mark.asyncio
 async def test_stream_emits_only_openai_chunks(monkeypatch):

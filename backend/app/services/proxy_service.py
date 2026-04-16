@@ -118,15 +118,19 @@ async def proxy_chat_completion(
     choices = []
     for i, c in enumerate(choices_data):
         msg = c.get("message", {})
+        tool_calls = msg.get("tool_calls") or None
+        finish_reason = c.get("finish_reason")
+        if tool_calls and finish_reason in (None, "stop"):
+            finish_reason = "tool_calls"
         choices.append(
             Choice(
                 index=i,
                 message=ChatMessage(
                     role=msg.get("role", "assistant"),
                     content=msg.get("content") or "",
-                    tool_calls=msg.get("tool_calls") or None,
+                    tool_calls=tool_calls,
                 ),
-                finish_reason=c.get("finish_reason"),
+                finish_reason=finish_reason,
             )
         )
 
