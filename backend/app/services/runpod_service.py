@@ -286,6 +286,8 @@ async def create_endpoint(
             {"key": "TOOL_CALL_PARSER", "value": tool_parser or "hermes"},
             {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
             {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
+            {"key": "VLLM_LOGGING_LEVEL", "value": "DEBUG"},
+            {"key": "ENABLE_LOG_REQUESTS", "value": "true"},
         ]
         if default_temperature is not None:
             env_vars.append({"key": "DEFAULT_TEMPERATURE", "value": str(default_temperature)})
