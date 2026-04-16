@@ -572,6 +572,65 @@ def _extract_text(output) -> str:
     return str(output) if output else ""
 
 
+def _parse_sse_chunks(sse_text: str) -> list[dict]:
+    """Parse vLLM SSE-formatted output and return raw chunk dicts.
+
+    vLLM streaming returns chunks like:
+        data: {"choices":[{"delta":{"tool_calls":[...]}, "finish_reason": null}]}
+    We need the FULL delta (including tool_calls) so the proxy can forward
+    structured tool-call streams to OpenAI-compatible clients (opencode, etc.).
+    """
+    if not isinstance(sse_text, str) or "data: " not in sse_text:
+        return []
+    chunks: list[dict] = []
+    for line in sse_text.split("\n"):
+        line = line.strip()
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        try:
+            chunks.append(json.loads(line[6:]))
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return chunks
+
+
+def _extract_chunks(output) -> list[dict]:
+    """Return list of raw vLLM chunk dicts from a single RunPod stream item.
+
+    Handles three shapes:
+      - str: SSE-formatted text (possibly multiple `data:` lines)
+      - dict with `choices[].delta`: a single chunk dict, return as-is
+      - dict with `choices[].message`: a non-stream completion, normalized into
+        a single chunk dict so streaming and non-streaming paths stay uniform
+    """
+    if isinstance(output, str):
+        return _parse_sse_chunks(output)
+    if isinstance(output, list) and len(output) > 0:
+        output = output[0]
+    if isinstance(output, dict):
+        choices = output.get("choices") or []
+        if choices and "delta" in choices[0]:
+            return [output]
+        if choices and "message" in choices[0]:
+            normalized = []
+            for ch in choices:
+                msg = ch.get("message", {})
+                delta = {}
+                if msg.get("content") is not None:
+                    delta["content"] = msg["content"]
+                if msg.get("tool_calls"):
+                    delta["tool_calls"] = msg["tool_calls"]
+                normalized.append({
+                    "choices": [{
+                        "index": ch.get("index", 0),
+                        "delta": delta,
+                        "finish_reason": ch.get("finish_reason"),
+                    }]
+                })
+            return normalized
+    return []
+
+
 async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[str, None]:
     """Run async inference via /run and poll /stream for incremental results.
 
@@ -604,10 +663,17 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
 
                 for chunk in data.get("stream", []):
                     output = chunk.get("output", "")
-                    text = _extract_text(output)
-                    if text:
-                        yield text
-                        yielded = True
+                    chunks_out = _extract_chunks(output)
+                    if chunks_out:
+                        for c in chunks_out:
+                            yield "__CHUNK:" + json.dumps(c)
+                            yielded = True
+                    else:
+                        # Fallback: pure text without OpenAI chunk wrapping
+                        text = _extract_text(output)
+                        if text:
+                            yield text
+                            yielded = True
 
                 status = data.get("status")
                 if status == "COMPLETED":
@@ -630,9 +696,14 @@ async def stream_inference(endpoint_id: str, payload: dict) -> AsyncGenerator[st
             if job_status == "COMPLETED":
                 if not yielded:
                     output = status_data.get("output", "")
-                    text = _extract_text(output)
-                    if text:
-                        yield text
+                    chunks_out = _extract_chunks(output)
+                    if chunks_out:
+                        for c in chunks_out:
+                            yield "__CHUNK:" + json.dumps(c)
+                    else:
+                        text = _extract_text(output)
+                        if text:
+                            yield text
                 return
             elif job_status == "FAILED":
                 raise RuntimeError(f"RunPod job failed: {status_data.get('error')}")

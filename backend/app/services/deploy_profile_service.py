@@ -13,7 +13,12 @@ FAMILY_LIMITS = {
         "native_context": 262144,
         "practical_cap": 262144,
         "preferred_gpu": "H200_141GB",
-        "tool_parser": "qwen3_xml",
+        # Qwen3-Coder is trained on the <function=name><parameter=...>...</parameter></function>
+        # XML tool format. vLLM's `qwen3_coder` parser handles that exact dialect.
+        # `qwen3_xml` parses the generic <tool_call>{...}</tool_call> wrapper and
+        # silently misses tool calls under long agent prompts (opencode bug #1809,
+        # vLLM/opencode #16488).
+        "tool_parser": "qwen3_coder",
         "default_temperature": 0.2,
     },
     "qwen3_general": {

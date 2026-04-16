@@ -180,34 +180,79 @@ async def proxy_chat_completion_stream(
     )
     yield f"data: {initial_chunk.model_dump_json()}\n\n"
 
-    # Stream content from RunPod
-    first_token_received = False
-    async for text_chunk in runpod_service.stream_inference(model.runpod_endpoint_id, payload):
-        if not text_chunk:
+    # Stream content from RunPod. The runpod_service yields three shapes:
+    #   - "__STATUS:<json>"  internal queue/progress markers (dropped here)
+    #   - "__CHUNK:<json>"   full vLLM SSE chunk dict (with delta.content
+    #                        AND/OR delta.tool_calls AND/OR finish_reason)
+    #   - "<plain text>"     legacy fallback when vLLM returned non-SSE text
+    finish_emitted = False
+    saw_structured_chunk = False
+    async for raw in runpod_service.stream_inference(model.runpod_endpoint_id, payload):
+        if not raw:
+            continue
+        if raw.startswith("__STATUS:"):
             continue
 
-        # Drop internal status markers so the public stream stays strictly
-        # OpenAI-compatible.
-        if text_chunk.startswith("__STATUS:"):
+        if raw.startswith("__CHUNK:"):
+            saw_structured_chunk = True
+            try:
+                src = json.loads(raw[len("__CHUNK:"):])
+            except (ValueError, json.JSONDecodeError):
+                continue
+            src_choices = src.get("choices") or []
+            if not src_choices:
+                continue
+            stream_choices = []
+            for sc in src_choices:
+                delta_in = sc.get("delta") or {}
+                fr = sc.get("finish_reason")
+                tool_calls = delta_in.get("tool_calls")
+                # vLLM may return finish_reason="stop" on the last chunk even
+                # when tool_calls were emitted in earlier deltas. Normalize so
+                # OpenAI-compatible clients (opencode, OpenClaude) see the
+                # canonical "tool_calls" reason on the final chunk.
+                if fr in (None, "stop") and (tool_calls or saw_structured_chunk):
+                    if tool_calls:
+                        fr_out = "tool_calls" if fr == "stop" else None
+                    else:
+                        fr_out = fr
+                else:
+                    fr_out = fr
+                if fr_out:
+                    finish_emitted = True
+                stream_choices.append(StreamChoice(
+                    index=sc.get("index", 0),
+                    delta=DeltaMessage(
+                        role=delta_in.get("role"),
+                        content=delta_in.get("content"),
+                        tool_calls=tool_calls,
+                    ),
+                    finish_reason=fr_out,
+                ))
+            chunk_out = ChatCompletionChunk(
+                id=completion_id,
+                created=created,
+                model=request.model,
+                choices=stream_choices,
+            )
+            yield f"data: {chunk_out.model_dump_json()}\n\n"
             continue
 
-        if not first_token_received:
-            first_token_received = True
-
+        # Legacy text-only path (no structured chunk available)
         chunk = ChatCompletionChunk(
             id=completion_id,
             created=created,
             model=request.model,
-            choices=[StreamChoice(index=0, delta=DeltaMessage(content=text_chunk), finish_reason=None)],
+            choices=[StreamChoice(index=0, delta=DeltaMessage(content=raw), finish_reason=None)],
         )
         yield f"data: {chunk.model_dump_json()}\n\n"
 
-    # Send finish chunk
-    finish_chunk = ChatCompletionChunk(
-        id=completion_id,
-        created=created,
-        model=request.model,
-        choices=[StreamChoice(index=0, delta=DeltaMessage(), finish_reason="stop")],
-    )
-    yield f"data: {finish_chunk.model_dump_json()}\n\n"
+    if not finish_emitted:
+        finish_chunk = ChatCompletionChunk(
+            id=completion_id,
+            created=created,
+            model=request.model,
+            choices=[StreamChoice(index=0, delta=DeltaMessage(), finish_reason="stop")],
+        )
+        yield f"data: {finish_chunk.model_dump_json()}\n\n"
     yield "data: [DONE]\n\n"
