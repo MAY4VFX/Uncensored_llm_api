@@ -86,9 +86,6 @@ async def _stream_playground(
         if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
             try:
                 data = json.loads(chunk[6:])
-                if data.get("object") == "status":
-                    yield chunk
-                    continue
                 content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
                 if content:
                     if gpu_start is None:
