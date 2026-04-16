@@ -62,3 +62,8 @@ dump.rdb
 
 # Git worktrees
 .worktrees/
+
+# Local Claude/Dokploy artifacts (not project code)
+.claude/
+dokploy_openapi.json
+logs/
