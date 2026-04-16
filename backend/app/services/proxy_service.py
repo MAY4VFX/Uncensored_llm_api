@@ -119,6 +119,13 @@ async def proxy_chat_completion(
     for i, c in enumerate(choices_data):
         msg = c.get("message", {})
         tool_calls = msg.get("tool_calls") or None
+        if tool_calls:
+            for tc in tool_calls:
+                fn = tc.get("function") or {}
+                if "arguments" in fn:
+                    fn["arguments"] = runpod_service._normalize_tool_call_arguments(
+                        fn["arguments"]
+                    )
         finish_reason = c.get("finish_reason")
         if tool_calls and finish_reason in (None, "stop"):
             finish_reason = "tool_calls"

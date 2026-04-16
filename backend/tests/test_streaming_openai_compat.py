@@ -4,7 +4,27 @@ import pytest
 
 from app.models.llm_model import LlmModel
 from app.schemas.openai import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
-from app.services import proxy_service
+from app.services import proxy_service, runpod_service
+
+
+def test_normalize_tool_call_arguments_unwraps_double_encoded_json():
+    """vLLM qwen3_coder streaming returns arguments as JSON-encoded strings;
+    we must collapse them back to plain JSON-object strings.
+    """
+    src = '"{\\"filePath\\": \\"/tmp/x.txt\\"}"'
+    out = runpod_service._normalize_tool_call_arguments(src)
+    assert out == '{"filePath": "/tmp/x.txt"}'
+
+
+def test_normalize_tool_call_arguments_passes_normal_json_through():
+    src = '{"filePath": "/tmp/x.txt"}'
+    assert runpod_service._normalize_tool_call_arguments(src) == src
+
+
+def test_normalize_tool_call_arguments_passes_partial_chunk_through():
+    """Streaming may emit incremental fragments — leave them alone."""
+    assert runpod_service._normalize_tool_call_arguments('{"filePath') == '{"filePath'
+    assert runpod_service._normalize_tool_call_arguments('') == ''
 
 
 @pytest.mark.asyncio

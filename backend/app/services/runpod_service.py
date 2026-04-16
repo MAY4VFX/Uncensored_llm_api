@@ -572,6 +572,55 @@ def _extract_text(output) -> str:
     return str(output) if output else ""
 
 
+def _normalize_tool_call_arguments(arguments) -> str:
+    """Workaround for the vLLM `qwen3_coder` streaming parser bug (opencode
+    issues #1809, #16488): in stream mode it emits `function.arguments` as a
+    *JSON-encoded* string, e.g. `"{\\"filePath\\":\\"...\\"}"`, while OpenAI
+    spec requires arguments to be a plain JSON-object string like
+    `{"filePath":"..."}`.
+
+    If the value parses into a string that itself parses into a JSON object,
+    unwrap it. Otherwise return as-is.
+    """
+    if not isinstance(arguments, str):
+        return arguments
+    s = arguments.strip()
+    if not s.startswith('"') or not s.endswith('"'):
+        return arguments
+    try:
+        inner = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return arguments
+    if not isinstance(inner, str):
+        return arguments
+    inner_stripped = inner.strip()
+    if not inner_stripped.startswith(("{", "[")):
+        return arguments
+    try:
+        json.loads(inner)
+    except (json.JSONDecodeError, ValueError):
+        return arguments
+    return inner
+
+
+def _normalize_chunk(chunk: dict) -> dict:
+    """Normalize vLLM streaming chunk in place — repair tool_call arguments
+    that the qwen3_coder parser returns double-encoded.
+    """
+    for ch in chunk.get("choices") or []:
+        delta = ch.get("delta") or {}
+        for tc in delta.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            if "arguments" in fn:
+                fn["arguments"] = _normalize_tool_call_arguments(fn["arguments"])
+        msg = ch.get("message") or {}
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            if "arguments" in fn:
+                fn["arguments"] = _normalize_tool_call_arguments(fn["arguments"])
+    return chunk
+
+
 def _parse_sse_chunks(sse_text: str) -> list[dict]:
     """Parse vLLM SSE-formatted output and return raw chunk dicts.
 
@@ -588,7 +637,7 @@ def _parse_sse_chunks(sse_text: str) -> list[dict]:
         if not line.startswith("data: ") or line == "data: [DONE]":
             continue
         try:
-            chunks.append(json.loads(line[6:]))
+            chunks.append(_normalize_chunk(json.loads(line[6:])))
         except (json.JSONDecodeError, ValueError):
             continue
     return chunks
