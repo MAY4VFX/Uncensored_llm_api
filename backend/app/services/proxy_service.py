@@ -162,16 +162,10 @@ async def proxy_chat_completion_stream(
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
-    # Check worker status before starting inference
+    # Check worker status before starting inference.
+    # Keep this for internal control flow only — do not emit custom status
+    # objects in the OpenAI-compatible stream.
     worker_status = await runpod_service.check_worker_status(model.runpod_endpoint_id)
-    if not worker_status["ready"]:
-        status_event = {
-            "object": "status",
-            "status": worker_status["status"],
-            "message": _status_message(worker_status["status"]),
-            "estimated_wait": worker_status["estimated_wait"],
-        }
-        yield f"data: {json.dumps(status_event)}\n\n"
 
     # Send initial role chunk
     initial_chunk = ChatCompletionChunk(
@@ -188,24 +182,13 @@ async def proxy_chat_completion_stream(
         if not text_chunk:
             continue
 
-        # Handle status markers from stream_inference (queue/progress updates)
+        # Drop internal status markers so the public stream stays strictly
+        # OpenAI-compatible.
         if text_chunk.startswith("__STATUS:"):
-            status_data = json.loads(text_chunk[9:])
-            status_event = {
-                "object": "status",
-                "status": status_data.get("status", "unknown"),
-                "message": status_data.get("message", ""),
-                "elapsed": status_data.get("elapsed", 0),
-            }
-            yield f"data: {json.dumps(status_event)}\n\n"
             continue
 
-        # First real token — send ready event if worker was cold
         if not first_token_received:
             first_token_received = True
-            if not worker_status["ready"]:
-                ready_event = {"object": "status", "status": "ready", "message": "Worker ready, generating..."}
-                yield f"data: {json.dumps(ready_event)}\n\n"
 
         chunk = ChatCompletionChunk(
             id=completion_id,
