@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -112,7 +113,9 @@ async def chat_completions(
 ):
     user, api_key = auth
     raw_body = await raw_request.body()
-    print("CHAT_RAW_BODY:", raw_body.decode("utf-8", errors="replace")[:12000], flush=True)
+    debug_path = Path(f"/tmp/unchained_chat_body_{int(time.time() * 1000)}.json")
+    debug_path.write_bytes(raw_body)
+    print(f"CHAT_RAW_BODY_FILE: {debug_path}", flush=True)
     print(
         "CHAT_PARSED_SUMMARY:",
         json.dumps(
