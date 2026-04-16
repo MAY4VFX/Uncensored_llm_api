@@ -192,8 +192,44 @@ async def proxy_chat_completion_stream(
     #   - "__CHUNK:<json>"   full vLLM SSE chunk dict (with delta.content
     #                        AND/OR delta.tool_calls AND/OR finish_reason)
     #   - "<plain text>"     legacy fallback when vLLM returned non-SSE text
+    #
+    # vLLM's qwen3_coder parser emits *cumulative* tool-call arguments in
+    # every chunk instead of OpenAI-style incremental deltas, and sometimes
+    # double-encodes them as JSON strings. To stay robust, we BUFFER tool
+    # calls per (choice_index, tool_index), accumulate cumulatively, then
+    # emit a single normalized tool_call chunk just before finish_reason.
+    # Content is still streamed in real time.
     finish_emitted = False
-    saw_structured_chunk = False
+    tool_buffers: dict[int, dict[int, dict]] = {}  # ci -> {ti -> {name,id,type,args}}
+
+    def _flush_tool_calls(ci: int) -> ChatCompletionChunk | None:
+        if ci not in tool_buffers or not tool_buffers[ci]:
+            return None
+        tcs_out = []
+        for ti in sorted(tool_buffers[ci].keys()):
+            buf = tool_buffers[ci][ti]
+            args = buf.get("args", "")
+            args = runpod_service._normalize_tool_call_arguments(args)
+            tcs_out.append({
+                "index": ti,
+                "id": buf.get("id"),
+                "type": buf.get("type", "function"),
+                "function": {
+                    "name": buf.get("name") or "",
+                    "arguments": args,
+                },
+            })
+        return ChatCompletionChunk(
+            id=completion_id,
+            created=created,
+            model=request.model,
+            choices=[StreamChoice(
+                index=ci,
+                delta=DeltaMessage(tool_calls=tcs_out),
+                finish_reason=None,
+            )],
+        )
+
     async for raw in runpod_service.stream_inference(model.runpod_endpoint_id, payload):
         if not raw:
             continue
@@ -201,7 +237,6 @@ async def proxy_chat_completion_stream(
             continue
 
         if raw.startswith("__CHUNK:"):
-            saw_structured_chunk = True
             try:
                 src = json.loads(raw[len("__CHUNK:"):])
             except (ValueError, json.JSONDecodeError):
@@ -209,40 +244,70 @@ async def proxy_chat_completion_stream(
             src_choices = src.get("choices") or []
             if not src_choices:
                 continue
-            stream_choices = []
+
             for sc in src_choices:
+                ci = sc.get("index", 0)
                 delta_in = sc.get("delta") or {}
                 fr = sc.get("finish_reason")
-                tool_calls = delta_in.get("tool_calls")
-                # vLLM may return finish_reason="stop" on the last chunk even
-                # when tool_calls were emitted in earlier deltas. Normalize so
-                # OpenAI-compatible clients (opencode, OpenClaude) see the
-                # canonical "tool_calls" reason on the final chunk.
-                if fr in (None, "stop") and (tool_calls or saw_structured_chunk):
-                    if tool_calls:
-                        fr_out = "tool_calls" if fr == "stop" else None
-                    else:
-                        fr_out = fr
-                else:
-                    fr_out = fr
-                if fr_out:
+                tool_calls_in = delta_in.get("tool_calls")
+                content = delta_in.get("content")
+                role = delta_in.get("role")
+
+                # Buffer tool_calls without forwarding yet
+                if tool_calls_in:
+                    tool_buffers.setdefault(ci, {})
+                    for tc in tool_calls_in:
+                        ti = tc.get("index", 0)
+                        buf = tool_buffers[ci].setdefault(ti, {"name": "", "id": "", "type": "function", "args": ""})
+                        if tc.get("id"):
+                            buf["id"] = tc["id"]
+                        if tc.get("type"):
+                            buf["type"] = tc["type"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            buf["name"] = fn["name"]
+                        new_args = fn.get("arguments")
+                        if new_args is not None:
+                            prev = buf["args"]
+                            if new_args.startswith(prev):
+                                # Cumulative form
+                                buf["args"] = new_args
+                            else:
+                                # Incremental form (or unrelated chunk)
+                                buf["args"] = prev + new_args
+
+                # Forward role/content immediately as their own chunk (preserves real-time UX)
+                if role is not None or content is not None:
+                    yield "data: " + ChatCompletionChunk(
+                        id=completion_id,
+                        created=created,
+                        model=request.model,
+                        choices=[StreamChoice(
+                            index=ci,
+                            delta=DeltaMessage(role=role, content=content),
+                            finish_reason=None,
+                        )],
+                    ).model_dump_json() + "\n\n"
+
+                if fr is not None:
+                    # Flush buffered tool_calls in one normalized chunk first
+                    flush = _flush_tool_calls(ci)
+                    if flush is not None:
+                        yield "data: " + flush.model_dump_json() + "\n\n"
+                        if fr == "stop":
+                            fr = "tool_calls"
+                        tool_buffers[ci] = {}
                     finish_emitted = True
-                stream_choices.append(StreamChoice(
-                    index=sc.get("index", 0),
-                    delta=DeltaMessage(
-                        role=delta_in.get("role"),
-                        content=delta_in.get("content"),
-                        tool_calls=tool_calls,
-                    ),
-                    finish_reason=fr_out,
-                ))
-            chunk_out = ChatCompletionChunk(
-                id=completion_id,
-                created=created,
-                model=request.model,
-                choices=stream_choices,
-            )
-            yield f"data: {chunk_out.model_dump_json()}\n\n"
+                    yield "data: " + ChatCompletionChunk(
+                        id=completion_id,
+                        created=created,
+                        model=request.model,
+                        choices=[StreamChoice(
+                            index=ci,
+                            delta=DeltaMessage(),
+                            finish_reason=fr,
+                        )],
+                    ).model_dump_json() + "\n\n"
             continue
 
         # Legacy text-only path (no structured chunk available)
@@ -253,6 +318,15 @@ async def proxy_chat_completion_stream(
             choices=[StreamChoice(index=0, delta=DeltaMessage(content=raw), finish_reason=None)],
         )
         yield f"data: {chunk.model_dump_json()}\n\n"
+
+    # If runpod stream ended without an explicit finish, flush any buffered
+    # tool_calls and emit the canonical finish_reason.
+    if not finish_emitted:
+        for ci in list(tool_buffers.keys()):
+            flush = _flush_tool_calls(ci)
+            if flush is not None:
+                yield "data: " + flush.model_dump_json() + "\n\n"
+                tool_buffers[ci] = {}
 
     if not finish_emitted:
         finish_chunk = ChatCompletionChunk(

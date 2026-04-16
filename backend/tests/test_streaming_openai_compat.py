@@ -567,3 +567,146 @@ async def test_stream_forwards_tool_calls_from_vllm_chunks(monkeypatch):
     assert "tool_calls" in finish_reasons, "finish_reason=tool_calls must appear"
     # No synthetic duplicate "stop" finish chunk after vLLM finished
     assert finish_reasons.count("stop") == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_converts_accumulated_tool_args_to_incremental(monkeypatch):
+    """vLLM's qwen3_coder parser ships *cumulative* tool_call arguments in
+    every chunk (not deltas). If we forward them as-is, agent clients that
+    concatenate (per OpenAI contract) end up with `{"command":"a"{"command":
+    "ab"}` and a JSON parse error. The proxy must collapse cumulative
+    arguments down to a real incremental delta sequence so concatenation
+    yields a single valid JSON object.
+    """
+    model = LlmModel(
+        slug="test-model",
+        display_name="Test Model",
+        hf_repo="test/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        runpod_endpoint_id="endpoint-1",
+        max_context_length=4096,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[ChatMessage(role="user", content="run command")],
+        tools=[{"type": "function", "function": {"name": "Bash"}}],
+        tool_choice="auto",
+        stream=True,
+    )
+
+    full = '{"command":"echo hi","description":"say hi"}'
+
+    async def fake_stream_inference(endpoint_id, payload):
+        # Each chunk repeats the cumulative arguments seen so far — exactly
+        # the pathological pattern observed from vLLM qwen3_coder streaming.
+        yield "__CHUNK:" + json.dumps({"choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})
+        yield "__CHUNK:" + json.dumps({"choices": [{"index": 0, "delta": {
+            "tool_calls": [{"index": 0, "id": "call_1", "type": "function",
+                            "function": {"name": "Bash", "arguments": full[:14]}}]
+        }, "finish_reason": None}]})
+        yield "__CHUNK:" + json.dumps({"choices": [{"index": 0, "delta": {
+            "tool_calls": [{"index": 0, "function": {"arguments": full[:30]}}]
+        }, "finish_reason": None}]})
+        yield "__CHUNK:" + json.dumps({"choices": [{"index": 0, "delta": {
+            "tool_calls": [{"index": 0, "function": {"arguments": full}}]
+        }, "finish_reason": "tool_calls"}]})
+
+    async def fake_check_worker_status(endpoint_id):
+        return {"ready": True, "status": "ready", "estimated_wait": 0}
+
+    monkeypatch.setattr("app.services.runpod_service.stream_inference", fake_stream_inference)
+    monkeypatch.setattr("app.services.runpod_service.check_worker_status", fake_check_worker_status)
+
+    pieces: list[str] = []
+    name = None
+    seen_id_count = 0
+    finish = None
+    async for raw in proxy_service.proxy_chat_completion_stream(request, model):
+        if not raw.startswith("data: ") or raw.strip() == "data: [DONE]":
+            continue
+        d = json.loads(raw[6:])
+        for ch in d.get("choices", []):
+            delta = ch.get("delta") or {}
+            if ch.get("finish_reason"):
+                finish = ch["finish_reason"]
+            for tc in delta.get("tool_calls") or []:
+                if tc.get("id"):
+                    seen_id_count += 1
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    name = fn["name"]
+                if fn.get("arguments") is not None:
+                    pieces.append(fn["arguments"])
+
+    # The proxy buffers tool_calls and emits ONE normalized chunk before
+    # finish — so concatenating pieces yields the exact full args once,
+    # never the accumulated/duplicated mess that vLLM streamed.
+    assert "".join(pieces) == full, f"got {''.join(pieces)!r}, expected {full!r}"
+    # Tool name and id must be emitted exactly once
+    assert name == "Bash"
+    assert seen_id_count == 1
+    assert finish == "tool_calls"
+    # Concatenated arguments must parse to a JSON object
+    assert json.loads("".join(pieces)) == {"command": "echo hi", "description": "say hi"}
+
+
+@pytest.mark.asyncio
+async def test_stream_unwraps_double_encoded_args_in_buffered_chunk(monkeypatch):
+    """If vLLM ships args as a JSON-encoded string (the qwen3_coder bug), the
+    final flushed tool_call must carry plain JSON-object args so opencode/
+    OpenClaude zod validation accepts it.
+    """
+    model = LlmModel(
+        slug="test-model",
+        display_name="Test Model",
+        hf_repo="test/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        runpod_endpoint_id="endpoint-1",
+        max_context_length=4096,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[ChatMessage(role="user", content="x")],
+        tools=[{"type": "function", "function": {"name": "read"}}],
+        tool_choice="auto",
+        stream=True,
+    )
+
+    encoded = '"{\\"filePath\\":\\"/x\\"}"'
+
+    async def fake_stream_inference(endpoint_id, payload):
+        yield "__CHUNK:" + json.dumps({"choices": [{"index": 0, "delta": {
+            "tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                            "function": {"name": "read", "arguments": encoded}}]
+        }, "finish_reason": "tool_calls"}]})
+
+    async def fake_check_worker_status(endpoint_id):
+        return {"ready": True, "status": "ready", "estimated_wait": 0}
+
+    monkeypatch.setattr("app.services.runpod_service.stream_inference", fake_stream_inference)
+    monkeypatch.setattr("app.services.runpod_service.check_worker_status", fake_check_worker_status)
+
+    final_args = ""
+    async for raw in proxy_service.proxy_chat_completion_stream(request, model):
+        if not raw.startswith("data: ") or raw.strip() == "data: [DONE]":
+            continue
+        d = json.loads(raw[6:])
+        for ch in d.get("choices", []):
+            for tc in (ch.get("delta") or {}).get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                if "arguments" in fn:
+                    final_args = fn["arguments"]
+    assert final_args == '{"filePath":"/x"}', f"unexpected args: {final_args!r}"
+    assert json.loads(final_args) == {"filePath": "/x"}
