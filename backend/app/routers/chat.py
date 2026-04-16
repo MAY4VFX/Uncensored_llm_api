@@ -111,17 +111,22 @@ async def chat_completions(
     db: AsyncSession = Depends(get_db),
 ):
     user, api_key = auth
-    logger = logging.getLogger(__name__)
     raw_body = await raw_request.body()
-    logger.info("chat raw body: %s", raw_body.decode("utf-8", errors="replace")[:12000])
-    logger.info(
-        "chat parsed summary: model=%s msgs=%s tools=%s tool_choice=%s stream=%s max_tokens=%s",
-        request.model,
-        len(request.messages),
-        len(request.tools or []),
-        json.dumps(request.tool_choice) if request.tool_choice is not None else None,
-        request.stream,
-        request.max_tokens,
+    print("CHAT_RAW_BODY:", raw_body.decode("utf-8", errors="replace")[:12000], flush=True)
+    print(
+        "CHAT_PARSED_SUMMARY:",
+        json.dumps(
+            {
+                "model": request.model,
+                "msgs": len(request.messages),
+                "tools": len(request.tools or []),
+                "tool_choice": request.tool_choice,
+                "stream": request.stream,
+                "max_tokens": request.max_tokens,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
     )
 
 
