@@ -449,3 +449,101 @@ async def test_stream_never_emits_object_status(monkeypatch):
 
     decoded = [c[6:] for c in chunks if c.startswith("data: ") and c.strip() != "data: [DONE]"]
     assert all(json.loads(c).get("object") != "status" for c in decoded)
+
+
+@pytest.mark.asyncio
+async def test_stream_forwards_tool_calls_from_vllm_chunks(monkeypatch):
+    """When vLLM emits delta.tool_calls, the proxy must forward them in the
+    OpenAI stream — extracting only `content` would silently drop tool calls
+    and leave agents (opencode, OpenClaude) unable to invoke any tool."""
+    model = LlmModel(
+        slug="test-model",
+        display_name="Test Model",
+        hf_repo="test/model",
+        params_b=7,
+        quantization="FP16",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        runpod_endpoint_id="endpoint-1",
+        max_context_length=4096,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    request = ChatCompletionRequest(
+        model="test-model",
+        messages=[ChatMessage(role="user", content="read the log file")],
+        tools=[{"type": "function", "function": {"name": "read"}}],
+        tool_choice="auto",
+        stream=True,
+    )
+
+    async def fake_stream_inference(endpoint_id, payload):
+        # Simulate the vLLM SSE chunk dicts that arrive via runpod_service.
+        # The stream_inference contract is: yield "__CHUNK:<json>" for every
+        # structured chunk (delta) and "__STATUS:..." for queue updates.
+        yield "__CHUNK:" + json.dumps({
+            "choices": [{
+                "index": 0,
+                "delta": {"role": "assistant"},
+                "finish_reason": None,
+            }]
+        })
+        yield "__CHUNK:" + json.dumps({
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": ""},
+                    }]
+                },
+                "finish_reason": None,
+            }]
+        })
+        yield "__CHUNK:" + json.dumps({
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {"arguments": "{\"filePath\":\"/tmp/x\"}"},
+                    }]
+                },
+                "finish_reason": None,
+            }]
+        })
+        yield "__CHUNK:" + json.dumps({
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "tool_calls",
+            }]
+        })
+
+    async def fake_check_worker_status(endpoint_id):
+        return {"ready": True, "status": "ready", "estimated_wait": 0}
+
+    monkeypatch.setattr("app.services.runpod_service.stream_inference", fake_stream_inference)
+    monkeypatch.setattr("app.services.runpod_service.check_worker_status", fake_check_worker_status)
+
+    chunks = []
+    async for chunk in proxy_service.proxy_chat_completion_stream(request, model):
+        chunks.append(chunk)
+
+    decoded = [json.loads(c[6:]) for c in chunks if c.startswith("data: ") and c.strip() != "data: [DONE]"]
+    tool_call_seen = False
+    finish_reasons = []
+    for d in decoded:
+        for ch in d.get("choices", []):
+            delta = ch.get("delta") or {}
+            if delta.get("tool_calls"):
+                tool_call_seen = True
+            if ch.get("finish_reason"):
+                finish_reasons.append(ch["finish_reason"])
+    assert tool_call_seen, "tool_calls must be forwarded as delta.tool_calls"
+    assert "tool_calls" in finish_reasons, "finish_reason=tool_calls must appear"
+    # No synthetic duplicate "stop" finish chunk after vLLM finished
+    assert finish_reasons.count("stop") == 0
