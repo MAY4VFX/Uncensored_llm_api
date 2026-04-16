@@ -1,6 +1,8 @@
+import json
+import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,10 +106,23 @@ async def terminate_model(
 @router.post("/v1/chat/completions")
 async def chat_completions(
     request: ChatCompletionRequest,
+    raw_request: Request,
     auth: tuple[User, ApiKey] = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     user, api_key = auth
+    logger = logging.getLogger(__name__)
+    raw_body = await raw_request.body()
+    logger.info("chat raw body: %s", raw_body.decode("utf-8", errors="replace")[:12000])
+    logger.info(
+        "chat parsed summary: model=%s msgs=%s tools=%s tool_choice=%s stream=%s max_tokens=%s",
+        request.model,
+        len(request.messages),
+        len(request.tools or []),
+        json.dumps(request.tool_choice) if request.tool_choice is not None else None,
+        request.stream,
+        request.max_tokens,
+    )
 
 
     # 1. Rate limit check
