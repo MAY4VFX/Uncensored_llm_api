@@ -10,20 +10,21 @@ from app.services.proxy_service import _build_vllm_payload
 
 
 @pytest.mark.asyncio
-async def test_add_model_from_hf_uses_resolved_deploy_profile(client: AsyncClient, admin_headers, monkeypatch):
+async def test_add_model_from_hf_uses_gpt_oss_profile(client: AsyncClient, admin_headers, monkeypatch):
     fake_hf = {
-        "id": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated",
+        "id": "ArliAI/gpt-oss-120b-Derestricted",
         "tags": [
-            "qwen3_moe",
+            "gpt_oss",
             "abliterated",
             "uncensored",
-            "base_model:Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            "reasoning",
+            "base_model:openai/gpt-oss-120b",
         ],
         "siblings": [{"rfilename": "config.json"}],
-        "cardData": {"base_model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct"]},
+        "cardData": {"base_model": ["openai/gpt-oss-120b"]},
         "downloads": 100,
         "likes": 10,
-        "safetensors": {"total": 30_500_000_000},
+        "safetensors": {"total": 117_000_000_000},
     }
 
     class FakeResponse:
@@ -43,13 +44,13 @@ async def test_add_model_from_hf_uses_resolved_deploy_profile(client: AsyncClien
     response = await client.post(
         "/admin/models/add-from-hf",
         headers=admin_headers,
-        json={"hf_repo": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated"},
+        json={"hf_repo": "ArliAI/gpt-oss-120b-Derestricted"},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["gpu_type"] == "H200_141GB"
-    assert body["max_context_length"] >= 131072
+    assert body["max_context_length"] >= 128000
 
 
 @pytest.mark.asyncio
@@ -67,7 +68,7 @@ async def test_chat_completion_no_auth(client: AsyncClient):
         "model": "some-model",
         "messages": [{"role": "user", "content": "Hello"}],
     })
-    assert resp.status_code == 422  # Missing auth header
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -91,13 +92,13 @@ async def test_health(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_admin_can_redeploy_active_model(client: AsyncClient, admin_headers, db_session, monkeypatch):
+async def test_redeploy_uses_gpt_oss_profile(client: AsyncClient, admin_headers, db_session, monkeypatch):
     model = LlmModel(
         id=uuid.uuid4(),
         slug="test-model",
         display_name="Test Model",
-        hf_repo="test/model",
-        params_b=7,
+        hf_repo="ArliAI/gpt-oss-120b-Derestricted",
+        params_b=117,
         quantization="FP16",
         gpu_type="H100_80GB",
         gpu_count=1,
@@ -111,15 +112,17 @@ async def test_admin_can_redeploy_active_model(client: AsyncClient, admin_header
     await db_session.commit()
 
     fake_hf = {
-        "id": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated",
+        "id": "ArliAI/gpt-oss-120b-Derestricted",
         "tags": [
-            "qwen3_moe",
+            "gpt_oss",
             "abliterated",
             "uncensored",
-            "base_model:Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            "reasoning",
+            "base_model:openai/gpt-oss-120b",
         ],
         "siblings": [{"rfilename": "config.json"}],
-        "cardData": {"base_model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct"]},
+        "cardData": {"base_model": ["openai/gpt-oss-120b"]},
+        "safetensors": {"total": 117_000_000_000},
     }
 
     class FakeResponse:
@@ -145,20 +148,14 @@ async def test_admin_can_redeploy_active_model(client: AsyncClient, admin_header
     assert response.json() == {"detail": "Model redeployed", "endpoint_id": "new-endpoint"}
     kwargs = mocked_create.await_args.kwargs
     assert kwargs["gpu_type"] == "H200_141GB"
-    assert kwargs["max_model_len"] >= 131072
-    assert kwargs["tool_parser"] == "qwen3_xml"
+    assert kwargs["max_model_len"] >= 128000
+    assert kwargs["tool_parser"] == "openai"
     assert kwargs["generation_config_mode"] == "vllm"
     assert kwargs["default_temperature"] <= 0.2
 
     await db_session.refresh(model)
     assert model.gpu_type == "H200_141GB"
-    assert model.max_context_length >= 131072
-
-    await db_session.refresh(model)
-    assert model.runpod_endpoint_id == "new-endpoint"
-    assert model.status == "active"
-
-    await db_session.refresh(model)
+    assert model.max_context_length >= 128000
     assert model.runpod_endpoint_id == "new-endpoint"
     assert model.status == "active"
 
@@ -180,8 +177,8 @@ async def test_redeploy_marks_model_inactive_on_create_failure(client: AsyncClie
         id=uuid.uuid4(),
         slug="broken-model",
         display_name="Broken Model",
-        hf_repo="broken/model",
-        params_b=7,
+        hf_repo="ArliAI/gpt-oss-120b-Derestricted",
+        params_b=117,
         quantization="FP16",
         gpu_type="H100_80GB",
         gpu_count=1,
@@ -195,15 +192,17 @@ async def test_redeploy_marks_model_inactive_on_create_failure(client: AsyncClie
     await db_session.commit()
 
     fake_hf = {
-        "id": "huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated",
+        "id": "ArliAI/gpt-oss-120b-Derestricted",
         "tags": [
-            "qwen3_moe",
+            "gpt_oss",
             "abliterated",
             "uncensored",
-            "base_model:Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            "reasoning",
+            "base_model:openai/gpt-oss-120b",
         ],
         "siblings": [{"rfilename": "config.json"}],
-        "cardData": {"base_model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct"]},
+        "cardData": {"base_model": ["openai/gpt-oss-120b"]},
+        "safetensors": {"total": 117_000_000_000},
     }
 
     class FakeResponse:
@@ -230,6 +229,53 @@ async def test_redeploy_marks_model_inactive_on_create_failure(client: AsyncClie
     await db_session.refresh(model)
     assert model.status == "inactive"
     assert model.runpod_endpoint_id is None
+
+
+@pytest.mark.asyncio
+async def test_create_endpoint_uses_openai_parser_and_larger_disk_for_gpt_oss(monkeypatch):
+    from app.services import runpod_service
+
+    captured_queries = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            if len(captured_queries) == 1:
+                return {"data": {"saveTemplate": {"id": "tpl-1", "name": "tpl"}}}
+            return {"data": {"saveEndpoint": {"id": "ep-1", "name": "ep", "gpuIds": "HOPPER_141", "templateId": "tpl-1"}}}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured_queries.append(json["query"])
+            return FakeResponse()
+
+    monkeypatch.setattr(runpod_service.httpx, "AsyncClient", lambda *args, **kwargs: FakeClient())
+
+    result = await runpod_service.create_endpoint(
+        name="unch-gpt-oss",
+        gpu_type="H200_141GB",
+        model_name="ArliAI/gpt-oss-120b-Derestricted",
+        params_b=117.0,
+        max_model_len=128000,
+        tool_parser="openai",
+        generation_config_mode="vllm",
+        default_temperature=0.2,
+    )
+
+    assert result["data"]["saveEndpoint"]["id"] == "ep-1"
+    template_query = captured_queries[0]
+    assert 'TOOL_CALL_PARSER", value: "openai"' in template_query
+    assert 'MAX_MODEL_LEN", value: "128000"' in template_query
+    assert 'MODEL_NAME", value: "ArliAI/gpt-oss-120b-Derestricted"' in template_query
+    assert "containerDiskInGb: 300" in template_query
 
 
 @pytest.mark.asyncio

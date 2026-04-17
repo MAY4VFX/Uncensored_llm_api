@@ -5,6 +5,7 @@ import logging
 import httpx
 
 from scout.config import settings
+from scout.gpu_selector import resolve_tool_parser
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def deploy_endpoint(
                 # misses tool calls under long agent prompts (opencode #1809,
                 # vLLM/opencode #16488). Backend's deploy_profile_service uses
                 # the same mapping; keep these two paths consistent.
-                {"key": "TOOL_CALL_PARSER", "value": "qwen3_coder" if "qwen3" in hf_repo.lower() and "coder" in hf_repo.lower() else "hermes"},
+                {"key": "TOOL_CALL_PARSER", "value": resolve_tool_parser({"id": hf_repo})},
                 {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
                 {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
             ],

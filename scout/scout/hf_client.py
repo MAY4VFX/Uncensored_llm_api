@@ -26,7 +26,7 @@ SEARCH_TERMS = [
 ]
 VALID_FORMATS = {"safetensors", "gguf"}
 MIN_PARAMS_B = 2.0
-MAX_PARAMS_B = 70.0
+MAX_PARAMS_B = 130.0
 
 
 def _headers() -> dict:

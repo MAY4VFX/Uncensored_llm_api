@@ -13,11 +13,6 @@ FAMILY_LIMITS = {
         "native_context": 262144,
         "practical_cap": 262144,
         "preferred_gpu": "H200_141GB",
-        # Qwen3-Coder is trained on the <function=name><parameter=...>...</parameter></function>
-        # XML tool format. vLLM's `qwen3_coder` parser handles that exact dialect.
-        # `qwen3_xml` parses the generic <tool_call>{...}</tool_call> wrapper and
-        # silently misses tool calls under long agent prompts (opencode bug #1809,
-        # vLLM/opencode #16488).
         "tool_parser": "qwen3_coder",
         "default_temperature": 0.2,
     },
@@ -26,6 +21,13 @@ FAMILY_LIMITS = {
         "practical_cap": 204800,
         "preferred_gpu": "H200_141GB",
         "tool_parser": "hermes",
+        "default_temperature": 0.2,
+    },
+    "gpt_oss": {
+        "native_context": 128000,
+        "practical_cap": 128000,
+        "preferred_gpu": "H200_141GB",
+        "tool_parser": "openai",
         "default_temperature": 0.2,
     },
     "glm": {
@@ -59,17 +61,35 @@ FAMILY_LIMITS = {
 }
 
 
-def _detect_family(metadata: dict) -> str:
-    repo = (metadata.get("id") or "").lower()
-    tags = [t.lower() for t in metadata.get("tags", [])]
+def _extract_base_text(metadata: dict, tags: list[str]) -> str:
     card = metadata.get("cardData") or {}
     base_model = card.get("base_model") or []
     if isinstance(base_model, str):
         base_model = [base_model]
-    base_text = " ".join(str(x).lower() for x in base_model)
+
+    tag_base_models = [
+        tag.split(":", 1)[1]
+        for tag in tags
+        if tag.startswith("base_model:") and ":" in tag
+    ]
+    return " ".join(str(x).lower() for x in [*base_model, *tag_base_models])
+
+
+
+def _detect_family(metadata: dict) -> str:
+    repo = (metadata.get("id") or "").lower()
+    tags = [str(t).lower() for t in metadata.get("tags", [])]
+    base_text = _extract_base_text(metadata, tags)
 
     if "gguf" in tags:
         return "gguf"
+    if (
+        "gpt-oss" in repo
+        or "gpt-oss" in base_text
+        or "gpt_oss" in tags
+        or "gpt-oss" in tags
+    ):
+        return "gpt_oss"
     if "coder" in repo or "coder" in base_text:
         if "qwen3" in repo or "qwen3" in base_text or "qwen3_moe" in tags:
             return "qwen3_coder"
@@ -82,18 +102,24 @@ def _detect_family(metadata: dict) -> str:
     return "fallback"
 
 
+
 def _estimate_safe_context(params_b: float, quantization: str, vram_gb: int, family: str) -> int:
     multiplier = QUANT_MULTIPLIERS.get(quantization, 1.0)
-    weight_budget = params_b * multiplier * 1.15
+
+    if family == "gpt_oss":
+        effective_params_b = min(params_b, 22.0)
+        weight_budget = effective_params_b * multiplier * 1.15
+    else:
+        weight_budget = params_b * multiplier * 1.15
+
     free_vram = vram_gb - weight_budget
     if free_vram <= 0:
         return 4096
 
-    # Qwen3 MoE models have much smaller active KV footprint than a naive
-    # dense-params formula suggests. Use a family-aware heuristic that matches
-    # observed behavior on current H200 deployments.
     if family.startswith("qwen3"):
         kv_per_4k = max(params_b * 0.045, 1.0)
+    elif family == "gpt_oss":
+        kv_per_4k = max(params_b * 0.02, 1.0)
     else:
         kv_per_4k = max(params_b * 0.5, 1.0)
 
@@ -102,24 +128,45 @@ def _estimate_safe_context(params_b: float, quantization: str, vram_gb: int, fam
     return max(ctx, 4096)
 
 
+
 def _safe_context_on_gpu(params_b: float, quantization: str, gpu_type: str, family: str) -> int:
     vram_gb = next(vram for name, vram in GPU_OPTIONS if name == gpu_type)
     return _estimate_safe_context(params_b, quantization, vram_gb, family)
 
-
-def _select_gpu_for_context(params_b: float, quantization: str, desired_context: int, family: str) -> tuple[str, int]:
-    for gpu_type, _vram_gb in GPU_OPTIONS:
-        if _safe_context_on_gpu(params_b, quantization, gpu_type, family) >= desired_context:
-            return gpu_type, 1
-    return "H200_141GB", 1
 
 
 def _coerce_minimum_context(family: str, gpu_type: str, computed_context: int) -> int:
     minimums = {
         ("qwen3_coder", "H200_141GB"): 204800,
         ("qwen3_general", "H200_141GB"): 131072,
+        ("gpt_oss", "H200_141GB"): 128000,
     }
     return max(computed_context, minimums.get((family, gpu_type), 4096))
+
+
+
+def _select_gpu_for_context(params_b: float, quantization: str, desired_context: int, family: str) -> tuple[str, int]:
+    preferred_gpu = FAMILY_LIMITS[family].get("preferred_gpu")
+    if preferred_gpu:
+        preferred_context = _coerce_minimum_context(
+            family,
+            preferred_gpu,
+            _safe_context_on_gpu(params_b, quantization, preferred_gpu, family),
+        )
+        if preferred_context >= desired_context:
+            return preferred_gpu, 1
+
+    for gpu_type, _vram_gb in GPU_OPTIONS:
+        safe_context = _coerce_minimum_context(
+            family,
+            gpu_type,
+            _safe_context_on_gpu(params_b, quantization, gpu_type, family),
+        )
+        if safe_context >= desired_context:
+            return gpu_type, 1
+
+    return "H200_141GB", 1
+
 
 
 def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -> dict:
@@ -142,5 +189,3 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
         "enable_prefix_caching": True,
         "enable_chunked_prefill": True,
     }
-
-
