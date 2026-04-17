@@ -93,6 +93,24 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
     if request.frequency_penalty is not None:
         payload["frequency_penalty"] = request.frequency_penalty
 
+    # Patch for GPT-OSS harmony parser crashes.
+    # OpenAI's gpt-oss release treats BOTH `<|return|>` (199999) AND `<|call|>`
+    # (200012) as EOS tokens (see openai/gpt-oss HF commit #105, 2025-08-13).
+    # Community forks (ArliAI/Derestricted, etc.) frequently ship a
+    # generation_config.json that forgot 200012 — so the model never stops on
+    # tool-call boundary, keeps generating malformed harmony tokens, and
+    # openai_harmony raises `HarmonyError: Unexpected token ... while
+    # expecting start token 200006` (vLLM issues #27243, #22578). Injecting
+    # 200012 as a stop token in sampling params forces vLLM to end generation
+    # at the same point OpenAI intended, regardless of the model repo's EOS.
+    hf_repo_lower = (model.hf_repo or "").lower()
+    if "gpt-oss" in hf_repo_lower or "gpt_oss" in hf_repo_lower:
+        existing = payload.get("stop_token_ids") or []
+        for tid in (199999, 200012):
+            if tid not in existing:
+                existing.append(tid)
+        payload["stop_token_ids"] = existing
+
     return {"openai_route": "/v1/chat/completions", "openai_input": payload}
 
 
