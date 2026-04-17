@@ -12,6 +12,8 @@ from scout.db import get_session, insert_model, model_exists, update_hf_stats, u
 from scout.deployer import deploy_endpoint
 from scout.gpu_selector import estimate_cost_per_1m_tokens, select_gpu
 from scout.hf_client import (
+    MAX_PARAMS_B,
+    MIN_PARAMS_B,
     determine_quantization,
     extract_params_b,
     filter_models,
@@ -62,12 +64,12 @@ async def scout_run():
 
             # Extract metadata
             params_b = extract_params_b(m)
-            if params_b is None or params_b < 2.0 or params_b > 70.0:
+            if params_b is None or params_b < MIN_PARAMS_B or params_b > MAX_PARAMS_B:
                 continue
 
             quant = determine_quantization(m)
-            gpu_type, _, max_context = select_gpu(params_b, quant)
-            cost_input, cost_output = estimate_cost_per_1m_tokens(params_b, quant)
+            gpu_type, _, max_context = select_gpu(m, params_b, quant)
+            cost_input, cost_output = estimate_cost_per_1m_tokens(m, params_b, quant)
             slug = _slugify(hf_repo)
 
             downloads = m.get("downloads", 0)

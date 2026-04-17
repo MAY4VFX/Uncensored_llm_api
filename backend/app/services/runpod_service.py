@@ -296,8 +296,10 @@ async def create_endpoint(
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
 
     # Scale container disk based on model size (model weights + runtime overhead)
-    # FP16: ~2 bytes/param, Q4: ~0.5 bytes/param, plus vLLM/CUDA overhead (~15GB)
-    if params_b >= 65:
+    # 100B+ reasoning models need extra headroom for downloads, unpacking and runtime cache.
+    if params_b >= 100:
+        container_disk = 300
+    elif params_b >= 65:
         container_disk = 200
     elif params_b >= 30:
         container_disk = 120
