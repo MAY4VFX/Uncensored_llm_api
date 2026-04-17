@@ -47,10 +47,20 @@ def test_gpt_oss_prefers_h200_openai_and_128k_context():
     assert profile["gpu_count"] == 2
     assert profile["target_context"] >= 128000
     assert profile["tool_parser"] == "openai"
-    assert profile["docker_image"] == "vllm/vllm-openai:v0.11.2"
+    assert profile["reasoning_parser"] == "openai_gptoss"
+    # gpt-oss must go through runpod/worker-v1-vllm (queue handler), not the
+    # bare vllm/vllm-openai image — jobs would hang in the queue.
+    assert profile["docker_image"] == ""
     assert profile["runtime_args"]["tensor_parallel_size"] == 2
     assert profile["runtime_args"]["max_num_batched_tokens"] == 1024
     assert profile["default_temperature"] <= 0.2
+    # Big-model cold-start + harmony parser workarounds are part of the profile
+    # contract so admin/redeploy always applies them.
+    assert profile["enforce_eager"] is True
+    assert profile["gpu_memory_utilization"] == 0.90
+    assert profile["generation_config_mode"] == "auto"
+    assert profile["runpod_init_timeout"] == 1800
+    assert profile["execution_timeout_ms"] == 1_800_000
 
 
 

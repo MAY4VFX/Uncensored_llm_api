@@ -266,9 +266,14 @@ async def deploy_model(
             max_model_len=profile["target_context"],
             gpu_count=profile["gpu_count"],
             tool_parser=profile["tool_parser"],
+            reasoning_parser=profile.get("reasoning_parser"),
             generation_config_mode=profile["generation_config_mode"],
             default_temperature=profile["default_temperature"],
             runtime_args=profile["runtime_args"],
+            enforce_eager=profile.get("enforce_eager", False),
+            gpu_memory_utilization=profile.get("gpu_memory_utilization"),
+            runpod_init_timeout=profile.get("runpod_init_timeout"),
+            execution_timeout_ms=profile.get("execution_timeout_ms"),
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
@@ -325,9 +330,14 @@ async def redeploy_model(
             max_model_len=profile["target_context"],
             gpu_count=profile["gpu_count"],
             tool_parser=profile["tool_parser"],
+            reasoning_parser=profile.get("reasoning_parser"),
             generation_config_mode=profile["generation_config_mode"],
             default_temperature=profile["default_temperature"],
             runtime_args=profile["runtime_args"],
+            enforce_eager=profile.get("enforce_eager", False),
+            gpu_memory_utilization=profile.get("gpu_memory_utilization"),
+            runpod_init_timeout=profile.get("runpod_init_timeout"),
+            execution_timeout_ms=profile.get("execution_timeout_ms"),
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})

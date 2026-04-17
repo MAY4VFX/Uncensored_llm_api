@@ -266,9 +266,14 @@ async def create_endpoint(
     max_model_len: int = 4096,
     gpu_count: int = 1,
     tool_parser: str | None = None,
+    reasoning_parser: str | None = None,
     generation_config_mode: str | None = None,
     default_temperature: float | None = None,
     runtime_args: dict | None = None,
+    enforce_eager: bool = False,
+    gpu_memory_utilization: float | None = None,
+    runpod_init_timeout: int | None = None,
+    execution_timeout_ms: int | None = None,
     db=None,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
@@ -279,9 +284,9 @@ async def create_endpoint(
     if not docker_image:
         if is_gguf:
             docker_image = "may4vfx/worker-llamacpp:latest"  # llama.cpp based worker (native GGUF support)
-        elif "gpt-oss" in model_name.lower():
-            docker_image = GPT_OSS_IMAGE
         else:
+            # gpt-oss also runs on runpod/worker-v1-vllm — the bare vllm/vllm-openai
+            # image has no RunPod queue handler so jobs would hang forever.
             docker_image = await _get_latest_vllm_image()
 
     logger.info(f"Creating endpoint: name={name} model={model_name} gpu={gpu_type} gpu_count={gpu_count} image={docker_image} gguf={is_gguf}")
@@ -315,11 +320,27 @@ async def create_endpoint(
             {"key": "TOOL_CALL_PARSER", "value": tool_parser or "hermes"},
             {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
             {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
-            {"key": "VLLM_LOGGING_LEVEL", "value": "DEBUG"},
+            {"key": "VLLM_LOGGING_LEVEL", "value": "INFO"},
             {"key": "ENABLE_LOG_REQUESTS", "value": "true"},
         ]
         if default_temperature is not None:
             env_vars.append({"key": "DEFAULT_TEMPERATURE", "value": str(default_temperature)})
+        if reasoning_parser:
+            env_vars.append({"key": "REASONING_PARSER", "value": reasoning_parser})
+        if enforce_eager:
+            env_vars.append({"key": "ENFORCE_EAGER", "value": "true"})
+        if gpu_memory_utilization is not None:
+            env_vars.append({"key": "GPU_MEMORY_UTILIZATION", "value": str(gpu_memory_utilization)})
+        if runpod_init_timeout is not None:
+            # RunPod platform-level timeout: how long the worker has to become
+            # ready before being killed. Default is ~7 min, too short for
+            # large-model cold starts (gpt-oss-120b needs ~13 min).
+            env_vars.append({"key": "RUNPOD_INIT_TIMEOUT", "value": str(runpod_init_timeout)})
+        if gpu_count and gpu_count > 1:
+            # Keep env-driven tensor parallelism consistent with our explicit
+            # gpu_count so worker-v1-vllm picks it up even if auto-detection
+            # sees only one visible GPU at import time.
+            env_vars.append({"key": "TENSOR_PARALLEL_SIZE", "value": str(gpu_count)})
 
     if settings.hf_token:
         env_vars.append({"key": "HF_TOKEN", "value": settings.hf_token})
@@ -348,14 +369,11 @@ async def create_endpoint(
             f'{{key: "{e["key"]}", value: "{e["value"].replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))}"}}'
             for e in env_vars
         )
+        # runpod/worker-v1-vllm reads all config from env vars and writes its
+        # own entrypoint — passing custom dockerArgs would override the
+        # entrypoint and make tini try to exec the first token as a command.
+        # Leave dockerArgs empty so the worker's own handler runs.
         docker_args = ""
-        if "gpt-oss" in model_name.lower():
-            docker_args = _build_gpt_oss_docker_args(
-                model_name=model_name,
-                max_model_len=max_model_len,
-                tool_parser=tool_parser,
-                runtime_args=runtime_args,
-            )
         escaped_docker_args = docker_args.replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))
         tmpl_query = (
             f'mutation {{ saveTemplate(input: {{'
@@ -386,6 +404,12 @@ async def create_endpoint(
         logger.info(f"GPU chain: {runpod_gpu} (base: {gpu_type})")
         ep_name = name[:50]
         gpu_count_field = f' gpuCount: {gpu_count},' if gpu_count > 1 else ''
+        # executionTimeoutMs gates the max runtime of a single job. RunPod's
+        # default (~10 min) kills long-loading workers mid-inference too, so
+        # for big models we raise it alongside RUNPOD_INIT_TIMEOUT.
+        exec_timeout_field = (
+            f' executionTimeoutMs: {int(execution_timeout_ms)},' if execution_timeout_ms else ''
+        )
         ep_query = (
             f'mutation {{ saveEndpoint(input: {{'
             f' name: "{ep_name}",'
@@ -395,6 +419,7 @@ async def create_endpoint(
             f' workersMin: 0,'
             f' workersMax: {max_workers},'
             f' idleTimeout: {idle_timeout},'
+            f'{exec_timeout_field}'
             f' scalerType: "QUEUE_DELAY",'
             f' scalerValue: 3'
             f' }}) {{ id name gpuIds templateId }} }}'

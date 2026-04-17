@@ -44,6 +44,35 @@ async def deploy_endpoint(
         }
     }
     """
+    is_gpt_oss = "gpt-oss" in hf_repo.lower() or "gpt_oss" in hf_repo.lower()
+    env = [
+        {"key": "MODEL_NAME", "value": hf_repo},
+        {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
+        # gpt-oss ships generation_config.json with eos_token_id the parser
+        # relies on (OpenAI fork adds <|call|>=200012). GENERATION_CONFIG=auto
+        # keeps those in effect; vllm default mode would discard them.
+        {"key": "GENERATION_CONFIG", "value": "auto" if is_gpt_oss else "vllm"},
+        {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
+        # Family-specific tool parser (see backend deploy_profile_service /
+        # CLAUDE.md: qwen3_coder for XML, openai for gpt-oss harmony, etc.).
+        {"key": "TOOL_CALL_PARSER", "value": resolve_tool_parser({"id": hf_repo})},
+        {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
+        {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
+    ]
+    if is_gpt_oss:
+        # Parity with backend/app/services/deploy_profile_service.py gpt_oss
+        # profile. Without these the worker either kills itself on CUDA graph
+        # compile (no ENFORCE_EAGER), hits RunPod init timeout (no
+        # RUNPOD_INIT_TIMEOUT), or parses harmony wrong (no REASONING_PARSER).
+        env.extend([
+            {"key": "REASONING_PARSER", "value": "openai_gptoss"},
+            {"key": "ENFORCE_EAGER", "value": "true"},
+            {"key": "GPU_MEMORY_UTILIZATION", "value": "0.90"},
+            {"key": "RUNPOD_INIT_TIMEOUT", "value": "1800"},
+        ])
+        if gpu_count and gpu_count > 1:
+            env.append({"key": "TENSOR_PARALLEL_SIZE", "value": str(gpu_count)})
+
     variables = {
         "input": {
             "name": name,
@@ -55,24 +84,13 @@ async def deploy_endpoint(
             "scalerType": "QUEUE_DELAY",
             "scalerValue": 3,
             "dockerImage": resolve_docker_image({"id": hf_repo}),
-            "env": [
-                {"key": "MODEL_NAME", "value": hf_repo},
-                {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
-                {"key": "GENERATION_CONFIG", "value": "vllm"},
-                {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
-                # Qwen3-Coder is trained on the
-                # `<function=name><parameter=...>...</parameter></function>` XML
-                # dialect — only vLLM's `qwen3_coder` parser handles it. The
-                # `qwen3_xml` parser (generic `<tool_call>{...}` wrapper) silently
-                # misses tool calls under long agent prompts (opencode #1809,
-                # vLLM/opencode #16488). Backend's deploy_profile_service uses
-                # the same mapping; keep these two paths consistent.
-                {"key": "TOOL_CALL_PARSER", "value": resolve_tool_parser({"id": hf_repo})},
-                {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
-                {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
-            ],
+            "env": env,
         }
     }
+    if is_gpt_oss:
+        # 30-min per-job ceiling so long cold-start + first inference don't
+        # trip RunPod's default 10-min executionTimeout.
+        variables["input"]["executionTimeoutMs"] = 1_800_000
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:

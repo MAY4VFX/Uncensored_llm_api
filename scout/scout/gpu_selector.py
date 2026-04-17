@@ -78,10 +78,11 @@ def resolve_tool_parser(model_ref: str | dict) -> str:
 
 
 def resolve_docker_image(model_ref: str | dict) -> str:
-    family = _detect_family(model_ref)
-    if family == "gpt_oss":
-        return "vllm/vllm-openai:v0.11.2"
-    return "runpod/worker-vllm:stable-cuda12.1.0"
+    # All vLLM-backed families use runpod/worker-v1-vllm. The bare
+    # vllm/vllm-openai image has no RunPod queue handler, so jobs dispatched
+    # via /run would hang in the queue forever (see CLAUDE.md / past
+    # gpt-oss-120b debug). Backend and scout deploy paths share this choice.
+    return "runpod/worker-v1-vllm:v2.14.0"
 
 
 

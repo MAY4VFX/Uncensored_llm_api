@@ -28,8 +28,32 @@ FAMILY_LIMITS = {
         "practical_cap": 128000,
         "preferred_gpu": "H200_141GB",
         "tool_parser": "openai",
-        "docker_image": "vllm/vllm-openai:v0.11.2",
+        # openai tool_parser needs openai_gptoss reasoning parser per vLLM GPT-OSS
+        # recipe (https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html)
+        "reasoning_parser": "openai_gptoss",
         "default_temperature": 0.2,
+        # vllm/vllm-openai image has no RunPod queue handler → jobs hang in
+        # queue forever. runpod/worker-v1-vllm polls the queue correctly and
+        # forwards to vLLM; use it for gpt-oss as well.
+        # "docker_image": "" → create_endpoint resolves latest worker-v1-vllm
+        # CUDA graph capture for gpt-oss 120b overruns RunPod's init timeout
+        # even when shards loaded fine. Eager inference eliminates 5-10 min of
+        # warmup and lets the worker reach ready reliably.
+        "enforce_eager": True,
+        # Headroom against OOM on 2xH200 FP16 (240 GB weights + KV cache).
+        "gpu_memory_utilization": 0.90,
+        # ArliAI fork ships a generation_config.json that dropped <|call|>
+        # (200012) from eos_token_id; GENERATION_CONFIG=auto lets vLLM use the
+        # model's file, and proxy_service injects stop_token_ids=[199999,200012]
+        # per request to compensate for the missing EOS.
+        "generation_config_mode": "auto",
+        # Cold start on 2xH200 for gpt-oss-120b FP16: ~7 min download, ~5 min
+        # shard load, ~30s init. RunPod default ~7 min init timeout kills it;
+        # 30 min gives plenty of headroom.
+        "runpod_init_timeout": 1800,
+        # A single request should not time out for 30 min either (inference
+        # itself can take several minutes on a 120B MoE with long prompts).
+        "execution_timeout_ms": 1_800_000,
         "runtime_args": {
             "max_num_batched_tokens": 1024,
         },
@@ -213,10 +237,15 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
         "gpu_count": gpu_count,
         "target_context": target_context,
         "tool_parser": limits["tool_parser"],
+        "reasoning_parser": limits.get("reasoning_parser"),
         "docker_image": docker_image,
         "default_temperature": limits["default_temperature"],
-        "generation_config_mode": "vllm",
+        "generation_config_mode": limits.get("generation_config_mode", "vllm"),
         "enable_prefix_caching": True,
         "enable_chunked_prefill": True,
+        "enforce_eager": limits.get("enforce_eager", False),
+        "gpu_memory_utilization": limits.get("gpu_memory_utilization"),
+        "runpod_init_timeout": limits.get("runpod_init_timeout"),
+        "execution_timeout_ms": limits.get("execution_timeout_ms"),
         "runtime_args": runtime_args,
     }
