@@ -57,7 +57,14 @@ async def deploy_endpoint(
                 {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},
                 {"key": "GENERATION_CONFIG", "value": "vllm"},
                 {"key": "ENABLE_AUTO_TOOL_CHOICE", "value": "true"},
-                {"key": "TOOL_CALL_PARSER", "value": "qwen3_xml" if "qwen3" in hf_repo.lower() and "coder" in hf_repo.lower() else "hermes"},
+                # Qwen3-Coder is trained on the
+                # `<function=name><parameter=...>...</parameter></function>` XML
+                # dialect — only vLLM's `qwen3_coder` parser handles it. The
+                # `qwen3_xml` parser (generic `<tool_call>{...}` wrapper) silently
+                # misses tool calls under long agent prompts (opencode #1809,
+                # vLLM/opencode #16488). Backend's deploy_profile_service uses
+                # the same mapping; keep these two paths consistent.
+                {"key": "TOOL_CALL_PARSER", "value": "qwen3_coder" if "qwen3" in hf_repo.lower() and "coder" in hf_repo.lower() else "hermes"},
                 {"key": "ENABLE_PREFIX_CACHING", "value": "true"},
                 {"key": "ENABLE_CHUNKED_PREFILL", "value": "true"},
             ],
