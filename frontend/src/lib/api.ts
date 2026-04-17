@@ -105,6 +105,7 @@ export const listAllModels = (token: string) =>
       description: string | null;
       hf_downloads: number | null;
       hf_likes: number | null;
+      created_at: string;
     }>
   >("/admin/models", { token });
 
