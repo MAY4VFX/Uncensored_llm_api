@@ -44,9 +44,12 @@ def test_gpt_oss_prefers_h200_openai_and_128k_context():
 
     assert profile["family"] == "gpt_oss"
     assert profile["gpu_type"] == "H200_141GB"
+    assert profile["gpu_count"] == 2
     assert profile["target_context"] >= 128000
     assert profile["tool_parser"] == "openai"
-    assert profile["docker_image"] == "vllm/vllm-openai:gptoss"
+    assert profile["docker_image"] == "vllm/vllm-openai:v0.11.2"
+    assert profile["runtime_args"]["tensor_parallel_size"] == 2
+    assert profile["runtime_args"]["max_num_batched_tokens"] == 1024
     assert profile["default_temperature"] <= 0.2
 
 
@@ -81,6 +84,9 @@ def test_gpt_oss_detects_base_model_without_repo_name_hint():
     assert profile["family"] == "gpt_oss"
     assert profile["tool_parser"] == "openai"
     assert profile["gpu_type"] == "H200_141GB"
+    assert profile["gpu_count"] == 1
+    assert profile["runtime_args"]["tensor_parallel_size"] == 1
+    assert profile["runtime_args"]["max_num_batched_tokens"] == 1024
     assert profile["target_context"] >= 128000
 
 
@@ -97,5 +103,8 @@ def test_gpt_oss_prefers_h200_even_if_smaller_gpu_could_fit_weights():
 
     assert profile["family"] == "gpt_oss"
     assert profile["gpu_type"] == "H200_141GB"
+    assert profile["gpu_count"] == 1
+    assert profile["runtime_args"]["tensor_parallel_size"] == 1
+    assert profile["runtime_args"]["max_num_batched_tokens"] == 1024
     assert profile["target_context"] >= 128000
     assert profile["tool_parser"] == "openai"

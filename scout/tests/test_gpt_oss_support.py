@@ -14,13 +14,14 @@ def test_hf_client_allows_117b_gpt_oss_models():
 
 
 def test_gpt_oss_profile_prefers_h200_and_128k_context():
-    gpu_type, _cost_hr, max_context = resolve_profile(
+    gpu_type, cost_hr, max_context = resolve_profile(
         "ArliAI/gpt-oss-120b-Derestricted",
         117.0,
         "FP16",
     )
 
     assert gpu_type == "H200_141GB"
+    assert cost_hr == 6.58
     assert max_context >= 128000
 
 
@@ -54,8 +55,8 @@ def test_gpt_oss_uses_dedicated_runtime_image():
         "tags": ["reasoning", "base_model:openai/gpt-oss-120b"],
         "cardData": {"base_model": ["openai/gpt-oss-120b"]},
     }
-    assert resolve_docker_image("ArliAI/gpt-oss-120b-Derestricted") == "vllm/vllm-openai:gptoss"
-    assert resolve_docker_image(metadata) == "vllm/vllm-openai:gptoss"
+    assert resolve_docker_image("ArliAI/gpt-oss-120b-Derestricted") == "vllm/vllm-openai:v0.11.2"
+    assert resolve_docker_image(metadata) == "vllm/vllm-openai:v0.11.2"
 
 
 

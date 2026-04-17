@@ -31,6 +31,7 @@ FAMILY_LIMITS = {
         "practical_cap": 128000,
         "preferred_gpu": "H200_141GB",
         "tool_parser": "openai",
+        "docker_image": "vllm/vllm-openai:v0.11.2",
     },
     "fallback": {
         "native_context": 32768,
@@ -79,7 +80,7 @@ def resolve_tool_parser(model_ref: str | dict) -> str:
 def resolve_docker_image(model_ref: str | dict) -> str:
     family = _detect_family(model_ref)
     if family == "gpt_oss":
-        return "vllm/vllm-openai:gptoss"
+        return "vllm/vllm-openai:v0.11.2"
     return "runpod/worker-vllm:stable-cuda12.1.0"
 
 
@@ -155,6 +156,10 @@ def resolve_profile(model_ref: str | dict, params_b: float, quant: str = "Q4") -
     limits = FAMILY_LIMITS[family]
     desired_context = limits["practical_cap"]
     gpu_name, cost_hr, safe_ctx = _select_gpu_for_context(params_b, quant, desired_context, family)
+
+    if family == "gpt_oss" and params_b >= 100:
+        return gpu_name, cost_hr * 2, min(desired_context, limits["native_context"], safe_ctx)
+
     return gpu_name, cost_hr, min(desired_context, limits["native_context"], safe_ctx)
 
 

@@ -89,9 +89,34 @@ GPU_HOURLY_COST = {
 
 VLLM_IMAGE_REPO = "runpod/worker-v1-vllm"
 VLLM_IMAGE_FALLBACK = f"{VLLM_IMAGE_REPO}:v2.14.0"
-GPT_OSS_IMAGE = "vllm/vllm-openai:gptoss"
+GPT_OSS_IMAGE = "vllm/vllm-openai:v0.11.2"
 
 _cached_latest_tag: str | None = None
+
+
+def _build_gpt_oss_docker_args(
+    model_name: str,
+    max_model_len: int,
+    tool_parser: str | None,
+    runtime_args: dict | None,
+) -> str:
+    runtime_args = runtime_args or {}
+    tensor_parallel_size = runtime_args.get("tensor_parallel_size", 1)
+    max_num_batched_tokens = runtime_args.get("max_num_batched_tokens", 1024)
+    parser = tool_parser or "openai"
+
+    return " ".join(
+        [
+            f"--model {model_name}",
+            "--host 0.0.0.0",
+            "--port 8000",
+            f"--max-model-len {max_model_len}",
+            f"--tool-call-parser {parser}",
+            "--enable-auto-tool-choice",
+            f"--tensor-parallel-size {tensor_parallel_size}",
+            f"--max-num-batched-tokens {max_num_batched_tokens}",
+        ]
+    )
 
 
 async def _get_latest_vllm_image() -> str:
@@ -243,6 +268,7 @@ async def create_endpoint(
     tool_parser: str | None = None,
     generation_config_mode: str | None = None,
     default_temperature: float | None = None,
+    runtime_args: dict | None = None,
     db=None,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
@@ -322,11 +348,20 @@ async def create_endpoint(
             f'{{key: "{e["key"]}", value: "{e["value"].replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))}"}}'
             for e in env_vars
         )
+        docker_args = ""
+        if "gpt-oss" in model_name.lower():
+            docker_args = _build_gpt_oss_docker_args(
+                model_name=model_name,
+                max_model_len=max_model_len,
+                tool_parser=tool_parser,
+                runtime_args=runtime_args,
+            )
+        escaped_docker_args = docker_args.replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))
         tmpl_query = (
             f'mutation {{ saveTemplate(input: {{'
             f' name: "{tmpl_name}",'
             f' imageName: "{docker_image}",'
-            f' dockerArgs: "",'
+            f' dockerArgs: "{escaped_docker_args}",'
             f' containerDiskInGb: {container_disk},'
             f' volumeInGb: 0,'
             f' isServerless: true,'

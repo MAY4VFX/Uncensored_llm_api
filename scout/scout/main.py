@@ -69,6 +69,7 @@ async def scout_run():
 
             quant = determine_quantization(m)
             gpu_type, _, max_context = select_gpu(m, params_b, quant)
+            gpu_count = 2 if ("gpt-oss-120b" in hf_repo.lower() or params_b >= 100) else 1
             cost_input, cost_output = estimate_cost_per_1m_tokens(m, params_b, quant)
             slug = _slugify(hf_repo)
 
@@ -96,6 +97,7 @@ async def scout_run():
                 "params_b": params_b,
                 "quantization": quant,
                 "gpu_type": gpu_type,
+                "gpu_count": gpu_count,
                 "max_context_length": max_context,
                 "cost_per_1m_input": cost_input,
                 "cost_per_1m_output": cost_output,
@@ -118,6 +120,7 @@ async def scout_run():
                     gpu_type=gpu_type,
                     hf_repo=hf_repo,
                     max_model_len=max_context,
+                    gpu_count=gpu_count,
                 )
                 if endpoint_id:
                     update_model_status(session, db_model.id, "active", endpoint_id)

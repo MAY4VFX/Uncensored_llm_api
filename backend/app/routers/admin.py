@@ -268,6 +268,7 @@ async def deploy_model(
             tool_parser=profile["tool_parser"],
             generation_config_mode=profile["generation_config_mode"],
             default_temperature=profile["default_temperature"],
+            runtime_args=profile["runtime_args"],
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
@@ -326,6 +327,7 @@ async def redeploy_model(
             tool_parser=profile["tool_parser"],
             generation_config_mode=profile["generation_config_mode"],
             default_temperature=profile["default_temperature"],
+            runtime_args=profile["runtime_args"],
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})

@@ -148,10 +148,13 @@ async def test_redeploy_uses_gpt_oss_profile(client: AsyncClient, admin_headers,
     assert response.json() == {"detail": "Model redeployed", "endpoint_id": "new-endpoint"}
     kwargs = mocked_create.await_args.kwargs
     assert kwargs["gpu_type"] == "H200_141GB"
+    assert kwargs["gpu_count"] == 2
     assert kwargs["max_model_len"] >= 128000
     assert kwargs["tool_parser"] == "openai"
-    assert kwargs["docker_image"] == "vllm/vllm-openai:gptoss"
+    assert kwargs["docker_image"] == "vllm/vllm-openai:v0.11.2"
     assert kwargs["generation_config_mode"] == "vllm"
+    assert kwargs["runtime_args"]["tensor_parallel_size"] == 2
+    assert kwargs["runtime_args"]["max_num_batched_tokens"] == 1024
     assert kwargs["default_temperature"] <= 0.2
 
     await db_session.refresh(model)
@@ -263,21 +266,26 @@ async def test_create_endpoint_uses_openai_parser_and_larger_disk_for_gpt_oss(mo
     result = await runpod_service.create_endpoint(
         name="unch-gpt-oss",
         gpu_type="H200_141GB",
-        docker_image="vllm/vllm-openai:gptoss",
+        docker_image="vllm/vllm-openai:v0.11.2",
         model_name="ArliAI/gpt-oss-120b-Derestricted",
         params_b=117.0,
         max_model_len=128000,
+        gpu_count=2,
         tool_parser="openai",
         generation_config_mode="vllm",
         default_temperature=0.2,
+        runtime_args={"tensor_parallel_size": 2, "max_num_batched_tokens": 1024},
     )
 
     assert result["data"]["saveEndpoint"]["id"] == "ep-1"
     template_query = captured_queries[0]
-    assert 'imageName: "vllm/vllm-openai:gptoss"' in template_query
+    endpoint_query = captured_queries[1]
+    assert 'imageName: "vllm/vllm-openai:v0.11.2"' in template_query
     assert 'TOOL_CALL_PARSER", value: "openai"' in template_query
     assert 'MAX_MODEL_LEN", value: "128000"' in template_query
     assert 'MODEL_NAME", value: "ArliAI/gpt-oss-120b-Derestricted"' in template_query
+    assert 'dockerArgs: "--model ArliAI/gpt-oss-120b-Derestricted --host 0.0.0.0 --port 8000 --max-model-len 128000 --tool-call-parser openai --enable-auto-tool-choice --tensor-parallel-size 2 --max-num-batched-tokens 1024"' in template_query
+    assert 'gpuCount: 2' in endpoint_query
     assert "containerDiskInGb: 300" in template_query
 
 

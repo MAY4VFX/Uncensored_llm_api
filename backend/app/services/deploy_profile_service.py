@@ -28,8 +28,11 @@ FAMILY_LIMITS = {
         "practical_cap": 128000,
         "preferred_gpu": "H200_141GB",
         "tool_parser": "openai",
-        "docker_image": "vllm/vllm-openai:gptoss",
+        "docker_image": "vllm/vllm-openai:v0.11.2",
         "default_temperature": 0.2,
+        "runtime_args": {
+            "max_num_batched_tokens": 1024,
+        },
     },
     "glm": {
         "native_context": 131072,
@@ -102,6 +105,16 @@ def _detect_family(metadata: dict) -> str:
         return "deepseek"
     return "fallback"
 
+
+
+def _detect_gpt_oss_size_class(metadata: dict, params_b: float) -> str:
+    repo = (metadata.get("id") or "").lower()
+    tags = [str(t).lower() for t in metadata.get("tags", [])]
+    base_text = _extract_base_text(metadata, tags)
+
+    if "gpt-oss-120b" in repo or "gpt-oss-120b" in base_text or params_b >= 100:
+        return "120b"
+    return "20b"
 
 
 def _estimate_safe_context(params_b: float, quantization: str, vram_gb: int, family: str) -> int:
@@ -183,6 +196,17 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
     if not docker_image and family == "gguf":
         docker_image = "may4vfx/worker-llamacpp:latest"
 
+    runtime_args = dict(limits.get("runtime_args", {}))
+
+    if family == "gpt_oss":
+        size_class = _detect_gpt_oss_size_class(metadata, params_b)
+        if size_class == "120b":
+            gpu_count = 2
+            runtime_args["tensor_parallel_size"] = 2
+        else:
+            gpu_count = 1
+            runtime_args["tensor_parallel_size"] = 1
+
     return {
         "family": family,
         "gpu_type": gpu_type,
@@ -194,4 +218,5 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
         "generation_config_mode": "vllm",
         "enable_prefix_caching": True,
         "enable_chunked_prefill": True,
+        "runtime_args": runtime_args,
     }

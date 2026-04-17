@@ -26,6 +26,7 @@ async def deploy_endpoint(
     max_workers: int = 5,
     idle_timeout: int = 30,
     max_model_len: int = 4096,
+    gpu_count: int = 1,
 ) -> str | None:
     """
     Create a RunPod Serverless Endpoint for vLLM.
@@ -47,6 +48,7 @@ async def deploy_endpoint(
         "input": {
             "name": name,
             "gpuIds": gpu_type,
+            "gpuCount": gpu_count,
             "workersMin": 0,
             "workersMax": max_workers,
             "idleTimeout": idle_timeout,
