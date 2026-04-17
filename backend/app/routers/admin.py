@@ -260,6 +260,7 @@ async def deploy_model(
         result = await create_endpoint(
             name=f"unch-{model.slug}",
             gpu_type=profile["gpu_type"],
+            docker_image=profile["docker_image"],
             model_name=model.hf_repo,
             params_b=float(model.params_b or 0),
             max_model_len=profile["target_context"],
@@ -317,6 +318,7 @@ async def redeploy_model(
         result = await create_endpoint(
             name=f"unch-{model.slug}",
             gpu_type=profile["gpu_type"],
+            docker_image=profile["docker_image"],
             model_name=model.hf_repo,
             params_b=float(model.params_b or 0),
             max_model_len=profile["target_context"],

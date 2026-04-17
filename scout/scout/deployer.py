@@ -5,7 +5,7 @@ import logging
 import httpx
 
 from scout.config import settings
-from scout.gpu_selector import resolve_tool_parser
+from scout.gpu_selector import resolve_docker_image, resolve_tool_parser
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def deploy_endpoint(
             "idleTimeout": idle_timeout,
             "scalerType": "QUEUE_DELAY",
             "scalerValue": 3,
-            "dockerImage": "runpod/worker-vllm:stable-cuda12.1.0",
+            "dockerImage": resolve_docker_image({"id": hf_repo}),
             "env": [
                 {"key": "MODEL_NAME", "value": hf_repo},
                 {"key": "MAX_MODEL_LEN", "value": str(max_model_len)},

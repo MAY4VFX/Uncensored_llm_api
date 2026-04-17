@@ -150,6 +150,7 @@ async def test_redeploy_uses_gpt_oss_profile(client: AsyncClient, admin_headers,
     assert kwargs["gpu_type"] == "H200_141GB"
     assert kwargs["max_model_len"] >= 128000
     assert kwargs["tool_parser"] == "openai"
+    assert kwargs["docker_image"] == "vllm/vllm-openai:gptoss"
     assert kwargs["generation_config_mode"] == "vllm"
     assert kwargs["default_temperature"] <= 0.2
 
@@ -262,6 +263,7 @@ async def test_create_endpoint_uses_openai_parser_and_larger_disk_for_gpt_oss(mo
     result = await runpod_service.create_endpoint(
         name="unch-gpt-oss",
         gpu_type="H200_141GB",
+        docker_image="vllm/vllm-openai:gptoss",
         model_name="ArliAI/gpt-oss-120b-Derestricted",
         params_b=117.0,
         max_model_len=128000,
@@ -272,6 +274,7 @@ async def test_create_endpoint_uses_openai_parser_and_larger_disk_for_gpt_oss(mo
 
     assert result["data"]["saveEndpoint"]["id"] == "ep-1"
     template_query = captured_queries[0]
+    assert 'imageName: "vllm/vllm-openai:gptoss"' in template_query
     assert 'TOOL_CALL_PARSER", value: "openai"' in template_query
     assert 'MAX_MODEL_LEN", value: "128000"' in template_query
     assert 'MODEL_NAME", value: "ArliAI/gpt-oss-120b-Derestricted"' in template_query

@@ -46,6 +46,7 @@ def test_gpt_oss_prefers_h200_openai_and_128k_context():
     assert profile["gpu_type"] == "H200_141GB"
     assert profile["target_context"] >= 128000
     assert profile["tool_parser"] == "openai"
+    assert profile["docker_image"] == "vllm/vllm-openai:gptoss"
     assert profile["default_temperature"] <= 0.2
 
 

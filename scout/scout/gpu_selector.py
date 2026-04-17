@@ -76,6 +76,14 @@ def resolve_tool_parser(model_ref: str | dict) -> str:
 
 
 
+def resolve_docker_image(model_ref: str | dict) -> str:
+    family = _detect_family(model_ref)
+    if family == "gpt_oss":
+        return "vllm/vllm-openai:gptoss"
+    return "runpod/worker-vllm:stable-cuda12.1.0"
+
+
+
 def _estimate_safe_context(params_b: float, quant: str, vram_gb: float, family: str) -> int:
     multiplier = QUANT_MULTIPLIERS.get(quant, 1.0)
 

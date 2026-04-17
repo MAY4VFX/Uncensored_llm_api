@@ -28,6 +28,7 @@ FAMILY_LIMITS = {
         "practical_cap": 128000,
         "preferred_gpu": "H200_141GB",
         "tool_parser": "openai",
+        "docker_image": "vllm/vllm-openai:gptoss",
         "default_temperature": 0.2,
     },
     "glm": {
@@ -178,12 +179,17 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
     safe_context = _coerce_minimum_context(family, gpu_type, safe_context)
     target_context = min(desired_context, limits["native_context"], safe_context)
 
+    docker_image = limits.get("docker_image", "")
+    if not docker_image and family == "gguf":
+        docker_image = "may4vfx/worker-llamacpp:latest"
+
     return {
         "family": family,
         "gpu_type": gpu_type,
         "gpu_count": gpu_count,
         "target_context": target_context,
         "tool_parser": limits["tool_parser"],
+        "docker_image": docker_image,
         "default_temperature": limits["default_temperature"],
         "generation_config_mode": "vllm",
         "enable_prefix_caching": True,

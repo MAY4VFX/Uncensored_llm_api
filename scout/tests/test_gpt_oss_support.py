@@ -1,4 +1,4 @@
-from scout.gpu_selector import resolve_profile, resolve_tool_parser
+from scout.gpu_selector import resolve_docker_image, resolve_profile, resolve_tool_parser
 from scout.hf_client import MAX_PARAMS_B, extract_params_b
 
 
@@ -45,3 +45,19 @@ def test_qwen3_coder_parser_mapping_unchanged():
 
 def test_fallback_parser_mapping_unchanged():
     assert resolve_tool_parser("some-org/unknown-model") == "hermes"
+
+
+
+def test_gpt_oss_uses_dedicated_runtime_image():
+    metadata = {
+        "id": "ArliAI/Derestricted-Reasoner",
+        "tags": ["reasoning", "base_model:openai/gpt-oss-120b"],
+        "cardData": {"base_model": ["openai/gpt-oss-120b"]},
+    }
+    assert resolve_docker_image("ArliAI/gpt-oss-120b-Derestricted") == "vllm/vllm-openai:gptoss"
+    assert resolve_docker_image(metadata) == "vllm/vllm-openai:gptoss"
+
+
+
+def test_non_gpt_oss_runtime_image_unchanged():
+    assert resolve_docker_image("huihui-ai/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated") == "runpod/worker-vllm:stable-cuda12.1.0"

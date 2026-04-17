@@ -89,6 +89,7 @@ GPU_HOURLY_COST = {
 
 VLLM_IMAGE_REPO = "runpod/worker-v1-vllm"
 VLLM_IMAGE_FALLBACK = f"{VLLM_IMAGE_REPO}:v2.14.0"
+GPT_OSS_IMAGE = "vllm/vllm-openai:gptoss"
 
 _cached_latest_tag: str | None = None
 
@@ -252,6 +253,8 @@ async def create_endpoint(
     if not docker_image:
         if is_gguf:
             docker_image = "may4vfx/worker-llamacpp:latest"  # llama.cpp based worker (native GGUF support)
+        elif "gpt-oss" in model_name.lower():
+            docker_image = GPT_OSS_IMAGE
         else:
             docker_image = await _get_latest_vllm_image()
 
