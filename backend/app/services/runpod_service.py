@@ -269,9 +269,6 @@ async def create_endpoint(
     generation_config_mode: str | None = None,
     default_temperature: float | None = None,
     runtime_args: dict | None = None,
-    execution_timeout_ms: int | None = None,
-    network_volume_id: str | None = None,
-    locations: str | None = None,
     db=None,
 ) -> dict:
     """Create a RunPod template + Serverless Endpoint via GraphQL API."""
@@ -389,18 +386,6 @@ async def create_endpoint(
         logger.info(f"GPU chain: {runpod_gpu} (base: {gpu_type})")
         ep_name = name[:50]
         gpu_count_field = f' gpuCount: {gpu_count},' if gpu_count > 1 else ''
-        # Large models need a longer execution timeout than RunPod's ~10 min
-        # default — otherwise the worker is killed mid-download and the
-        # endpoint loops burning money (see CLAUDE.md). Also: attach a
-        # network volume + pin to its data center so weights persist across
-        # cold starts.
-        exec_timeout_field = (
-            f' executionTimeoutMs: {int(execution_timeout_ms)},' if execution_timeout_ms else ''
-        )
-        network_volume_field = (
-            f' networkVolumeId: "{network_volume_id}",' if network_volume_id else ''
-        )
-        locations_field = f' locations: "{locations}",' if locations else ''
         ep_query = (
             f'mutation {{ saveEndpoint(input: {{'
             f' name: "{ep_name}",'
@@ -410,9 +395,6 @@ async def create_endpoint(
             f' workersMin: 0,'
             f' workersMax: {max_workers},'
             f' idleTimeout: {idle_timeout},'
-            f'{exec_timeout_field}'
-            f'{network_volume_field}'
-            f'{locations_field}'
             f' scalerType: "QUEUE_DELAY",'
             f' scalerValue: 3'
             f' }}) {{ id name gpuIds templateId }} }}'

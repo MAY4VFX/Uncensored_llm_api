@@ -207,19 +207,6 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
             gpu_count = 1
             runtime_args["tensor_parallel_size"] = 1
 
-    # For large models, the first cold start can take 8+ minutes because the
-    # worker downloads weights from HuggingFace. RunPod's default execution
-    # timeout (~10 min) then kills the worker mid-load, and it tries again,
-    # burning money in a loop. Give big models a 30-minute ceiling and flag
-    # them as needing a network volume so weights persist across cold starts.
-    approx_weight_gb = params_b * QUANT_MULTIPLIERS.get(quantization, 1.0) * 2  # bytes/param → GB is ~1:1 scale
-    if params_b >= 60 or approx_weight_gb >= 80:
-        execution_timeout_ms = 1_800_000  # 30 min
-        recommended_volume_gb = max(200, int(approx_weight_gb * 1.5) + 50)
-    else:
-        execution_timeout_ms = 600_000  # 10 min (RunPod default)
-        recommended_volume_gb = 0  # small enough to re-download on each cold start
-
     return {
         "family": family,
         "gpu_type": gpu_type,
@@ -232,6 +219,4 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
         "enable_prefix_caching": True,
         "enable_chunked_prefill": True,
         "runtime_args": runtime_args,
-        "execution_timeout_ms": execution_timeout_ms,
-        "recommended_volume_gb": recommended_volume_gb,
     }
