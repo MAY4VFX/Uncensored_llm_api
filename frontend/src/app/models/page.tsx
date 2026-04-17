@@ -23,6 +23,22 @@ interface Model {
 }
 
 const ALL_STATUSES = ["all", "active", "pending", "deploying", "inactive"] as const;
+const SIZE_BUCKETS = ["all", "lt10", "10to30", "30to70", "70plus"] as const;
+const QUANT_FILTERS = ["FP16", "Q8", "Q4", "GGUF"] as const;
+const TAG_FILTERS = [
+  "Uncensored",
+  "Qwen",
+  "Gemma",
+  "Reasoning",
+  "Abliterated",
+  "MoE",
+  "Heretic",
+  "GPT-OSS",
+] as const;
+
+type SizeBucket = (typeof SIZE_BUCKETS)[number];
+type QuantFilter = (typeof QUANT_FILTERS)[number];
+type TagFilter = (typeof TAG_FILTERS)[number];
 
 const statusStyle: Record<string, string> = {
   all: "text-neutral-100 border-neutral-100",
@@ -32,10 +48,75 @@ const statusStyle: Record<string, string> = {
   inactive: "text-surface-700 border-surface-700",
 };
 
+const sizeLabels: Record<SizeBucket, string> = {
+  all: "All sizes",
+  lt10: "<10B",
+  "10to30": "10–30B",
+  "30to70": "30–70B",
+  "70plus": "70B+",
+};
+
+function normalizeModelText(model: Model): string {
+  return [model.slug, model.hf_repo, model.display_name, model.description || ""].join(" ").toLowerCase();
+}
+
+function getDerivedTags(model: Model): Set<TagFilter> {
+  const text = normalizeModelText(model);
+  const tags = new Set<TagFilter>();
+
+  if (/(uncensored|unaligned|unfiltered|derestricted|amoral)/i.test(text)) tags.add("Uncensored");
+  if (/(qwen|qwopus|omnicoder)/i.test(text)) tags.add("Qwen");
+  if (/(gemma|supergemma)/i.test(text)) tags.add("Gemma");
+  if (/(reasoning|thinking|distill|distilled|\br1\b)/i.test(text)) tags.add("Reasoning");
+  if (/(abliterated|lorablated)/i.test(text)) tags.add("Abliterated");
+  if (/(\bmoe\b|a3b|a4b|a12b|a35b|8x|96e|e2b|e4b)/i.test(text)) tags.add("MoE");
+  if (/heretic/i.test(text)) tags.add("Heretic");
+  if (/(gpt-oss|gpt_oss)/i.test(text)) tags.add("GPT-OSS");
+
+  return tags;
+}
+
+function getSizeBucket(paramsB: number): SizeBucket {
+  if (paramsB < 10) return "lt10";
+  if (paramsB < 30) return "10to30";
+  if (paramsB < 70) return "30to70";
+  return "70plus";
+}
+
+function matchesQuantFilter(model: Model, selectedQuants: QuantFilter[]): boolean {
+  if (selectedQuants.length === 0) return true;
+
+  const text = normalizeModelText(model);
+  const quant = (model.quantization || "").toUpperCase();
+
+  return selectedQuants.some((selected) => {
+    if (selected === "GGUF") {
+      return /gguf/i.test(text) || quant === "GGUF";
+    }
+    return quant === selected;
+  });
+}
+
+function matchesTagFilter(model: Model, selectedTags: TagFilter[]): boolean {
+  if (selectedTags.length === 0) return true;
+
+  const derivedTags = getDerivedTags(model);
+  return selectedTags.some((tag) => derivedTags.has(tag));
+}
+
+function chipClass(isActive: boolean, activeStyle: string) {
+  return `text-[10px] font-mono uppercase tracking-wider px-2.5 py-1.5 border transition-colors ${
+    isActive ? `${activeStyle} bg-surface-200` : "text-surface-700 border-surface-400 hover:border-surface-600"
+  }`;
+}
+
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sizeFilter, setSizeFilter] = useState<SizeBucket>("all");
+  const [quantFilters, setQuantFilters] = useState<QuantFilter[]>([]);
+  const [tagFilters, setTagFilters] = useState<TagFilter[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [deployingId, setDeployingId] = useState<string | null>(null);
@@ -86,7 +167,7 @@ export default function ModelsPage() {
     setDeployingId(modelId);
     try {
       await deployModel(token, modelId);
-      setModels((prev) => prev.map((m) => m.id === modelId ? { ...m, status: "deploying" } : m));
+      setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, status: "deploying" } : m)));
     } catch (e: any) {
       alert(e.message || "Deploy failed");
     } finally {
@@ -100,7 +181,7 @@ export default function ModelsPage() {
     setUndeployingId(modelId);
     try {
       await setModelStatus(token, modelId, "inactive");
-      setModels((prev) => prev.map((m) => m.id === modelId ? { ...m, status: "inactive" } : m));
+      setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, status: "inactive" } : m)));
     } catch (e: any) {
       alert(e.message || "Undeploy failed");
     } finally {
@@ -124,22 +205,48 @@ export default function ModelsPage() {
     }
   };
 
-  // Non-admin users only see active models
+  const toggleQuantFilter = (quant: QuantFilter) => {
+    setQuantFilters((prev) =>
+      prev.includes(quant) ? prev.filter((value) => value !== quant) : [...prev, quant]
+    );
+  };
+
+  const toggleTagFilter = (tag: TagFilter) => {
+    setTagFilters((prev) =>
+      prev.includes(tag) ? prev.filter((value) => value !== tag) : [...prev, tag]
+    );
+  };
+
+  const clearExtraFilters = () => {
+    setSizeFilter("all");
+    setQuantFilters([]);
+    setTagFilters([]);
+  };
+
   const visibleModels = isAdmin ? models : models.filter((m) => m.status === "active");
 
   const filtered = visibleModels.filter((m) => {
+    const query = filter.toLowerCase();
     const matchesText =
-      m.display_name.toLowerCase().includes(filter.toLowerCase()) ||
-      m.slug.toLowerCase().includes(filter.toLowerCase());
+      m.display_name.toLowerCase().includes(query) ||
+      m.slug.toLowerCase().includes(query) ||
+      m.hf_repo.toLowerCase().includes(query) ||
+      (m.description || "").toLowerCase().includes(query);
+
     const matchesStatus = statusFilter === "all" || m.status === statusFilter;
-    return matchesText && matchesStatus;
+    const matchesSize = sizeFilter === "all" || getSizeBucket(m.params_b) === sizeFilter;
+    const matchesQuant = matchesQuantFilter(m, quantFilters);
+    const matchesTags = matchesTagFilter(m, tagFilters);
+
+    return matchesText && matchesStatus && matchesSize && matchesQuant && matchesTags;
   });
 
-  // Count models per status (for filter badges)
   const statusCounts = visibleModels.reduce<Record<string, number>>((acc, m) => {
     acc[m.status] = (acc[m.status] || 0) + 1;
     return acc;
   }, {});
+
+  const activeExtraFilterCount = (sizeFilter !== "all" ? 1 : 0) + quantFilters.length + tagFilters.length;
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-16">
@@ -153,41 +260,113 @@ export default function ModelsPage() {
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4 mb-8">
-        <div className="flex-1">
-          <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Search</label>
-          <input
-            type="text"
-            placeholder="Filter models..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="input-field w-full max-w-md"
-          />
+      <div className="space-y-4 mb-8">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex-1">
+            <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Search</label>
+            <input
+              type="text"
+              placeholder="Filter models..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="input-field w-full max-w-md"
+            />
+          </div>
+
+          {isAdmin && (
+            <div>
+              <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Status</label>
+              <div className="flex flex-wrap gap-1">
+                {ALL_STATUSES.map((s) => {
+                  const count = s === "all" ? visibleModels.length : statusCounts[s] || 0;
+                  const isActive = statusFilter === s;
+                  const style = statusStyle[s] || statusStyle.inactive;
+                  return (
+                    <button key={s} onClick={() => setStatusFilter(s)} className={chipClass(isActive, style)}>
+                      {s} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {isAdmin && (
-          <div>
-            <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Status</label>
-            <div className="flex gap-1">
-              {ALL_STATUSES.map((s) => {
-                const count = s === "all" ? visibleModels.length : (statusCounts[s] || 0);
-                const isActive = statusFilter === s;
-                const style = statusStyle[s] || statusStyle.inactive;
-                return (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    className={`text-[10px] font-mono uppercase tracking-wider px-2.5 py-1.5 border transition-colors ${
-                      isActive
-                        ? `${style} bg-surface-200`
-                        : "text-surface-700 border-surface-400 hover:border-surface-600"
-                    }`}
-                  >
-                    {s} ({count})
-                  </button>
-                );
-              })}
+          <>
+            <div>
+              <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Size</label>
+              <div className="flex flex-wrap gap-2">
+                {SIZE_BUCKETS.map((bucket) => {
+                  const isActive = sizeFilter === bucket;
+                  return (
+                    <button
+                      key={bucket}
+                      onClick={() => setSizeFilter(bucket)}
+                      className={chipClass(isActive, "text-terminal-400 border-terminal-400")}
+                    >
+                      {sizeLabels[bucket]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            <div>
+              <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Quant</label>
+              <div className="flex flex-wrap gap-2">
+                {QUANT_FILTERS.map((quant) => {
+                  const isActive = quantFilters.includes(quant);
+                  return (
+                    <button
+                      key={quant}
+                      onClick={() => toggleQuantFilter(quant)}
+                      className={chipClass(isActive, "text-terminal-400 border-terminal-400")}
+                    >
+                      {quant}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Tags</label>
+              <div className="flex flex-wrap gap-2">
+                {TAG_FILTERS.map((tag) => {
+                  const isActive = tagFilters.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => toggleTagFilter(tag)}
+                      className={chipClass(isActive, "text-terminal-400 border-terminal-400")}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-surface-300 pt-3">
+              <p className="text-xs font-mono text-surface-800">
+                {filtered.length} models found
+                {activeExtraFilterCount > 0 ? ` • ${activeExtraFilterCount} extra filters active` : ""}
+              </p>
+              <button
+                onClick={clearExtraFilters}
+                disabled={activeExtraFilterCount === 0}
+                className="text-[10px] font-mono uppercase tracking-wider px-3 py-1.5 border text-surface-700 border-surface-400 hover:border-surface-600 disabled:opacity-40 disabled:hover:border-surface-400 transition-colors self-start"
+              >
+                Clear extra filters
+              </button>
+            </div>
+          </>
+        )}
+
+        {!isAdmin && (
+          <div className="border-t border-surface-300 pt-3">
+            <p className="text-xs font-mono text-surface-800">{filtered.length} models found</p>
           </div>
         )}
       </div>
@@ -214,9 +393,7 @@ export default function ModelsPage() {
               {adding ? "Adding..." : "Add Model"}
             </button>
           </div>
-          {addError && (
-            <p className="text-red-400 text-xs font-mono mt-2">{addError}</p>
-          )}
+          {addError && <p className="text-red-400 text-xs font-mono mt-2">{addError}</p>}
         </div>
       )}
 
