@@ -269,6 +269,7 @@ async def deploy_model(
             generation_config_mode=profile["generation_config_mode"],
             default_temperature=profile["default_temperature"],
             runtime_args=profile["runtime_args"],
+            execution_timeout_ms=profile.get("execution_timeout_ms"),
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
@@ -328,6 +329,7 @@ async def redeploy_model(
             generation_config_mode=profile["generation_config_mode"],
             default_temperature=profile["default_temperature"],
             runtime_args=profile["runtime_args"],
+            execution_timeout_ms=profile.get("execution_timeout_ms"),
             db=db,
         )
         endpoint_data = result.get("data", {}).get("saveEndpoint", {})
