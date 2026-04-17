@@ -1,8 +1,13 @@
 import re
 import uuid
 
+import asyncio
+import logging
+
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -333,10 +338,26 @@ async def redeploy_model(
     return {"detail": "Model redeployed", "endpoint_id": model.runpod_endpoint_id}
 
 
+async def _delete_endpoint_background(endpoint_id: str) -> None:
+    """Run RunPod endpoint deletion off the request path.
+
+    RunPod's GraphQL delete can take 10-30s when workers are active, which
+    tripped Cloudflare's 100s origin timeout (521) under some conditions
+    and generally kept the admin UI spinning. The DB row is already marked
+    inactive before this runs, so the model is effectively disabled from
+    the user's perspective even if the RunPod call is slow or fails.
+    """
+    try:
+        await delete_endpoint(endpoint_id)
+    except Exception as exc:
+        logger.warning("Background delete_endpoint(%s) failed: %s", endpoint_id, exc)
+
+
 @router.post("/models/{model_id}/status")
 async def update_model_status(
     model_id: uuid.UUID,
     request: UpdateModelStatusRequest,
+    background_tasks: BackgroundTasks,
     _: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -344,13 +365,15 @@ async def update_model_status(
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
 
+    pending_endpoint_delete: str | None = None
     if request.status == "inactive" and model.runpod_endpoint_id:
-        try:
-            await delete_endpoint(model.runpod_endpoint_id)
-        except Exception:
-            pass
+        pending_endpoint_delete = model.runpod_endpoint_id
         model.runpod_endpoint_id = None
 
     model.status = request.status
     await db.commit()
+
+    if pending_endpoint_delete:
+        background_tasks.add_task(_delete_endpoint_background, pending_endpoint_delete)
+
     return {"detail": f"Model status updated to {request.status}"}
