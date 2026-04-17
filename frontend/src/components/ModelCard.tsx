@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 interface ModelCardProps {
   id: string;
   slug: string;
@@ -49,6 +51,17 @@ export default function ModelCard({
   undeploying,
 }: ModelCardProps) {
   const st = statusConfig[status] || statusConfig.inactive;
+  const [copied, setCopied] = useState(false);
+
+  const handleCopySlug = async () => {
+    try {
+      await navigator.clipboard.writeText(slug);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <div className="ind-card group">
@@ -120,7 +133,17 @@ export default function ModelCard({
       </div>
 
       <div className="mt-3 pt-3 border-t border-surface-300 flex items-center justify-between gap-2">
-        <code className="text-[10px] font-mono text-surface-700 break-all flex-1 min-w-0 truncate">{slug}</code>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <code className="text-[10px] font-mono text-surface-700 break-all flex-1 min-w-0 truncate">{slug}</code>
+          <button
+            type="button"
+            onClick={handleCopySlug}
+            className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 border text-surface-800 border-surface-400 bg-surface-100 hover:bg-surface-200 transition-colors flex-shrink-0"
+            title="Copy model ID"
+          >
+            {copied ? "Copied" : "Copy ID"}
+          </button>
+        </div>
         {isAdmin && (status === "inactive" || status === "pending") && onDeploy && (
           <button
             onClick={() => onDeploy(id)}
