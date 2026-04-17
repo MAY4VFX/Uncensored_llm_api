@@ -15,7 +15,9 @@ interface ModelCardProps {
   hfLikes?: number | null;
   isAdmin?: boolean;
   onDeploy?: (modelId: string) => void;
+  onUndeploy?: (modelId: string) => void;
   deploying?: boolean;
+  undeploying?: boolean;
 }
 
 const statusConfig: Record<string, { color: string; dot: string }> = {
@@ -42,7 +44,9 @@ export default function ModelCard({
   hfLikes,
   isAdmin,
   onDeploy,
+  onUndeploy,
   deploying,
+  undeploying,
 }: ModelCardProps) {
   const st = statusConfig[status] || statusConfig.inactive;
 
@@ -115,15 +119,29 @@ export default function ModelCard({
         </div>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-surface-300 flex items-center justify-between">
-        <code className="text-[10px] font-mono text-surface-700 break-all">{slug}</code>
+      <div className="mt-3 pt-3 border-t border-surface-300 flex items-center justify-between gap-2">
+        <code className="text-[10px] font-mono text-surface-700 break-all flex-1 min-w-0 truncate">{slug}</code>
         {isAdmin && (status === "inactive" || status === "pending") && onDeploy && (
           <button
             onClick={() => onDeploy(id)}
             disabled={deploying}
-            className="text-[10px] font-mono uppercase tracking-wider px-3 py-1 border text-terminal-400 border-terminal-800 bg-terminal-950/40 hover:bg-terminal-900/60 transition-colors disabled:opacity-40"
+            className="text-[10px] font-mono uppercase tracking-wider px-3 py-1 border text-terminal-400 border-terminal-800 bg-terminal-950/40 hover:bg-terminal-900/60 transition-colors disabled:opacity-40 flex-shrink-0"
           >
             {deploying ? "Deploying..." : "Deploy"}
+          </button>
+        )}
+        {isAdmin && (status === "active" || status === "deploying") && onUndeploy && (
+          <button
+            onClick={() => {
+              if (confirm(`Удалить деплой «${displayName}»?\n\nRunPod endpoint будет удалён, модель станет inactive. Её можно будет передеплоить заново.`)) {
+                onUndeploy(id);
+              }
+            }}
+            disabled={undeploying}
+            className="text-[10px] font-mono uppercase tracking-wider px-3 py-1 border text-red-400 border-red-900 bg-red-950/30 hover:bg-red-900/40 transition-colors disabled:opacity-40 flex-shrink-0"
+            title="Удалить RunPod endpoint, перевести в inactive"
+          >
+            {undeploying ? "Stopping..." : "Undeploy"}
           </button>
         )}
       </div>

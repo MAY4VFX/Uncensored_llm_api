@@ -121,6 +121,17 @@ export const deployModel = (token: string, modelId: string) =>
     token,
   });
 
+export const setModelStatus = (
+  token: string,
+  modelId: string,
+  status: "active" | "inactive" | "pending" | "deploying"
+) =>
+  apiFetch<{ detail: string }>(`/admin/models/${modelId}/status`, {
+    method: "POST",
+    token,
+    body: JSON.stringify({ status }),
+  });
+
 export const terminateModel = (token: string, modelSlug: string) =>
   apiFetch<{ status: string; message: string }>(`/v1/models/${modelSlug}/terminate`, {
     method: "POST",

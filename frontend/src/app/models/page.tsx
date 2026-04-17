@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ModelCard from "@/components/ModelCard";
-import { listAllModels, deployModel, addModelFromHf, getMe } from "@/lib/api";
+import { listAllModels, deployModel, setModelStatus, addModelFromHf, getMe } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
 interface Model {
@@ -39,6 +39,7 @@ export default function ModelsPage() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [deployingId, setDeployingId] = useState<string | null>(null);
+  const [undeployingId, setUndeployingId] = useState<string | null>(null);
   const [hfInput, setHfInput] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
@@ -90,6 +91,20 @@ export default function ModelsPage() {
       alert(e.message || "Deploy failed");
     } finally {
       setDeployingId(null);
+    }
+  };
+
+  const handleUndeploy = async (modelId: string) => {
+    const token = getToken();
+    if (!token) return;
+    setUndeployingId(modelId);
+    try {
+      await setModelStatus(token, modelId, "inactive");
+      setModels((prev) => prev.map((m) => m.id === modelId ? { ...m, status: "inactive" } : m));
+    } catch (e: any) {
+      alert(e.message || "Undeploy failed");
+    } finally {
+      setUndeployingId(null);
     }
   };
 
@@ -232,7 +247,9 @@ export default function ModelsPage() {
               hfLikes={m.hf_likes}
               isAdmin={isAdmin}
               onDeploy={handleDeploy}
+              onUndeploy={handleUndeploy}
               deploying={deployingId === m.id}
+              undeploying={undeployingId === m.id}
             />
           ))}
         </div>
