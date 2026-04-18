@@ -518,9 +518,50 @@ async def deploy_model(
     )
 
 
+async def _redeploy_background(model_id: uuid.UUID, provider: str) -> None:
+    from app.database import async_session
+    async with async_session() as db:
+        model = await db.get(LlmModel, model_id)
+        if not model:
+            return
+        try:
+            metadata = await _fetch_metadata(model.hf_repo)
+            profile = resolve_deploy_profile(metadata, params_b=float(model.params_b or 0), quantization=model.quantization)
+            model.gpu_type = profile["gpu_type"]
+            model.gpu_count = profile["gpu_count"]
+            model.max_context_length = profile["target_context"]
+            if provider == RUNPOD and model.runpod_endpoint_id:
+                await delete_endpoint(model.runpod_endpoint_id)
+                model.runpod_endpoint_id = None
+                await db.commit()
+            if provider == MODAL:
+                result = await redeploy_modal_model(model, profile)
+                model.runpod_endpoint_id = None
+                model.deployment_ref = result.get("deployment_ref")
+                model.provider_config = result.get("provider_config")
+                model.provider_status = result.get("provider_status", "provisioning")
+                model.status = "active" if model.provider_status == "active" else "inactive"
+            else:
+                endpoint_id, deployment_ref = await _deploy_runpod_model(model, profile, db)
+                model.runpod_endpoint_id = endpoint_id
+                model.deployment_ref = deployment_ref
+                model.provider_status = "active"
+                model.status = "active"
+            await db.commit()
+        except Exception as exc:
+            logger.exception("Background redeploy %s failed: %s", model_id, exc)
+            model.status = "inactive"
+            model.provider_status = "inactive"
+            cfg = dict(model.provider_config or {})
+            cfg["last_error"] = str(exc)[:500]
+            model.provider_config = cfg
+            await db.commit()
+
+
 @router.post("/models/{model_id}/redeploy", response_model=RedeployModelResponse)
 async def redeploy_model(
     model_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     _: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -529,53 +570,17 @@ async def redeploy_model(
         raise HTTPException(status_code=404, detail="Model not found")
 
     provider = await resolve_model_provider(model, db)
+    metadata = await _fetch_metadata(model.hf_repo)
+    profile = resolve_deploy_profile(metadata, params_b=float(model.params_b or 0), quantization=model.quantization)
+    if provider == MODAL and not modal_supports_runtime(profile):
+        raise HTTPException(status_code=400, detail="Modal v1 supports only vLLM families; GGUF must stay on RunPod")
+
     model.status = "deploying"
     model.provider_status = "deploying"
     await db.commit()
-
-    try:
-        metadata = await _fetch_metadata(model.hf_repo)
-        profile = resolve_deploy_profile(metadata, params_b=float(model.params_b or 0), quantization=model.quantization)
-        if provider == MODAL and not modal_supports_runtime(profile):
-            raise HTTPException(status_code=400, detail="Modal v1 supports only vLLM families; GGUF must stay on RunPod")
-
-        model.gpu_type = profile["gpu_type"]
-        model.gpu_count = profile["gpu_count"]
-        model.max_context_length = profile["target_context"]
-
-        if provider == RUNPOD and model.runpod_endpoint_id:
-            await delete_endpoint(model.runpod_endpoint_id)
-            model.runpod_endpoint_id = None
-            await db.commit()
-
-        if provider == MODAL:
-            result = await redeploy_modal_model(model, profile)
-            model.runpod_endpoint_id = None
-            model.deployment_ref = result.get("deployment_ref")
-            model.provider_config = result.get("provider_config")
-            model.provider_status = result.get("provider_status", "provisioning")
-            model.status = "active" if model.provider_status == "active" else "inactive"
-        else:
-            endpoint_id, deployment_ref = await _deploy_runpod_model(model, profile, db)
-            model.runpod_endpoint_id = endpoint_id
-            model.deployment_ref = deployment_ref
-            model.provider_status = "active"
-            model.status = "active"
-    except HTTPException:
-        model.status = "inactive"
-        model.provider_status = "inactive"
-        await db.commit()
-        raise
-    except Exception as e:
-        model.status = "inactive"
-        model.provider_status = "inactive"
-        await db.commit()
-        raise HTTPException(status_code=500, detail=f"Deployment failed: {e}")
-
-    await db.commit()
-    detail = "Model redeployed" if model.status == "active" else "Provider scaffold updated; model remains inactive until runtime is implemented"
+    background_tasks.add_task(_redeploy_background, model_id, provider)
     return RedeployModelResponse(
-        detail=detail,
+        detail="Redeploy started in background; poll /v1/models/{slug}/status",
         provider=provider,
         endpoint_id=model.runpod_endpoint_id,
         deployment_ref=model.deployment_ref,
