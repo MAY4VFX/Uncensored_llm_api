@@ -23,7 +23,7 @@ def _build_image() -> modal.Image:
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("git", "curl")
         .pip_install(
-            "vllm==0.11.2",
+            "vllm==0.19.1",
             "fastapi==0.115.6",
             "uvicorn[standard]==0.34.0",
         )
