@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     runpod_api_key: str = ""
     runpod_base_url: str = "https://api.runpod.ai/v2"
 
+    # Modal
+    modal_token_id: str = ""
+    modal_token_secret: str = ""
+    modal_environment: str = "main"
+    modal_app_prefix: str = "unchained"
+
     # HuggingFace (for gated models)
     hf_token: str = ""
 
@@ -33,6 +39,10 @@ class Settings(BaseSettings):
     rate_limit_business: int = 300
 
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    @property
+    def modal_enabled(self) -> bool:
+        return bool(self.modal_token_id and self.modal_token_secret)
 
 
 settings = Settings()
