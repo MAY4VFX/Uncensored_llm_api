@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -78,7 +79,7 @@ def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | No
     return env
 
 
-def _run_modal_runtime(env: dict[str, str]) -> dict[str, Any]:
+def _run_modal_runtime_blocking(env: dict[str, str]) -> dict[str, Any]:
     if not settings.modal_enabled:
         raise ModalProviderError("Modal credentials are not configured")
     runtime_path = os.path.join(os.path.dirname(__file__), "modal_runtime.py")
@@ -97,9 +98,13 @@ def _run_modal_runtime(env: dict[str, str]) -> dict[str, Any]:
         raise ModalProviderError(f"Modal runtime returned invalid JSON: {proc.stdout.strip()}") from exc
 
 
+async def _run_modal_runtime(env: dict[str, str]) -> dict[str, Any]:
+    return await asyncio.to_thread(_run_modal_runtime_blocking, env)
+
+
 async def deploy_model(model: LlmModel, profile: dict[str, Any], default_image: str | None = None) -> dict[str, Any]:
     env = _modal_env(model, profile, default_image=default_image)
-    result = _run_modal_runtime(env)
+    result = await _run_modal_runtime(env)
     deployment_ref = result.get("app_id") or result.get("app_name")
     provider_config = {
         **_provider_config(model),
@@ -124,13 +129,7 @@ async def redeploy_model(model: LlmModel, profile: dict[str, Any], default_image
     return await deploy_model(model, profile, default_image=default_image)
 
 
-async def update_min_containers(model: LlmModel, count: int) -> bool:
-    if not settings.modal_enabled:
-        raise ModalProviderError("Modal credentials are not configured")
-    config = _provider_config(model)
-    app_name = config.get("app_name") or f"{settings.modal_app_prefix}-{model.slug}"
-    function_name = config.get("function_name") or "openai_api"
-    env_name = config.get("environment") or settings.modal_environment
+def _update_min_containers_blocking(app_name: str, function_name: str, env_name: str, count: int) -> None:
     proc = subprocess.run(
         ["python", "-c",
          "import sys, modal; "
@@ -143,6 +142,16 @@ async def update_min_containers(model: LlmModel, count: int) -> bool:
     )
     if proc.returncode != 0:
         raise ModalProviderError(proc.stderr.strip() or proc.stdout.strip() or "update_autoscaler failed")
+
+
+async def update_min_containers(model: LlmModel, count: int) -> bool:
+    if not settings.modal_enabled:
+        raise ModalProviderError("Modal credentials are not configured")
+    config = _provider_config(model)
+    app_name = config.get("app_name") or f"{settings.modal_app_prefix}-{model.slug}"
+    function_name = config.get("function_name") or "openai_api"
+    env_name = config.get("environment") or settings.modal_environment
+    await asyncio.to_thread(_update_min_containers_blocking, app_name, function_name, env_name, count)
     return True
 
 
