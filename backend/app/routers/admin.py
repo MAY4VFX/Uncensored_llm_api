@@ -488,13 +488,13 @@ async def deploy_model(
             model.runpod_endpoint_id = None
             model.deployment_ref = deployment_ref
             model.provider_status = "provisioning"
+            model.status = "inactive"
         else:
             endpoint_id, deployment_ref = await _deploy_runpod_model(model, profile, db)
             model.runpod_endpoint_id = endpoint_id
             model.deployment_ref = deployment_ref
             model.provider_status = "active"
-
-        model.status = "active"
+            model.status = "active"
     except HTTPException:
         model.status = "inactive"
         model.provider_status = "inactive"
@@ -507,8 +507,9 @@ async def deploy_model(
         raise HTTPException(status_code=500, detail=f"Deployment failed: {e}")
 
     await db.commit()
+    detail = "Model deployed" if model.status == "active" else "Provider scaffold prepared; model remains inactive until runtime is implemented"
     return DeployModelResponse(
-        detail="Model deployed",
+        detail=detail,
         provider=await resolve_model_provider(model, db),
         endpoint_id=model.runpod_endpoint_id,
         deployment_ref=model.deployment_ref,
@@ -550,13 +551,13 @@ async def redeploy_model(
             model.runpod_endpoint_id = None
             model.deployment_ref = result.get("deployment_ref")
             model.provider_status = result.get("provider_status", "provisioning")
+            model.status = "inactive"
         else:
             endpoint_id, deployment_ref = await _deploy_runpod_model(model, profile, db)
             model.runpod_endpoint_id = endpoint_id
             model.deployment_ref = deployment_ref
             model.provider_status = "active"
-
-        model.status = "active"
+            model.status = "active"
     except HTTPException:
         model.status = "inactive"
         model.provider_status = "inactive"
@@ -569,8 +570,9 @@ async def redeploy_model(
         raise HTTPException(status_code=500, detail=f"Deployment failed: {e}")
 
     await db.commit()
+    detail = "Model redeployed" if model.status == "active" else "Provider scaffold updated; model remains inactive until runtime is implemented"
     return RedeployModelResponse(
-        detail="Model redeployed",
+        detail=detail,
         provider=provider,
         endpoint_id=model.runpod_endpoint_id,
         deployment_ref=model.deployment_ref,

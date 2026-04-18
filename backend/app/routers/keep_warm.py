@@ -41,7 +41,10 @@ async def disable_keep_warm(
     db: AsyncSession = Depends(get_db),
 ):
     model = await _get_active_model(slug, db)
-    return await keep_warm_service.disable(db, user.id, model)
+    try:
+        return await keep_warm_service.disable(db, user.id, model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/v1/models/{slug}/keep-warm")
