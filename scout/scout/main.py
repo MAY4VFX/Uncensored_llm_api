@@ -8,7 +8,14 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 from scout.analyzer import analyze_model_card, fetch_model_card
 from scout.config import settings
-from scout.db import get_session, insert_model, model_exists, update_hf_stats, update_model_status
+from scout.db import (
+    get_session,
+    insert_model,
+    model_exists,
+    should_auto_deploy_runpod,
+    update_hf_stats,
+    update_model_status,
+)
 from scout.deployer import deploy_endpoint
 from scout.gpu_selector import estimate_cost_per_1m_tokens, select_gpu
 from scout.hf_client import (
@@ -111,9 +118,9 @@ async def scout_run():
             new_count += 1
             logger.info(f"Added model: {hf_repo} (params={params_b}B, gpu={gpu_type})")
 
-            # Auto-deploy if above threshold
-            if auto_deploy:
-                logger.info(f"Auto-deploying {hf_repo}...")
+            # Auto-deploy only on the real RunPod path. Modal remains backend-managed.
+            if auto_deploy and should_auto_deploy_runpod(session, db_model.provider_override):
+                logger.info(f"Auto-deploying {hf_repo} to RunPod...")
                 update_model_status(session, db_model.id, "deploying")
                 endpoint_id = await deploy_endpoint(
                     name=f"unch-{slug[:40]}",
@@ -128,6 +135,8 @@ async def scout_run():
                 else:
                     update_model_status(session, db_model.id, "pending")
                     logger.error(f"Failed to deploy {hf_repo}")
+            elif auto_deploy:
+                logger.info(f"Skipping direct scout auto-deploy for {hf_repo}: provider is modal/backend-managed")
 
     finally:
         session.close()
