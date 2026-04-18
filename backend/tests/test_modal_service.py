@@ -21,6 +21,12 @@ def test_supports_runtime_rejects_gguf():
     assert modal_service.supports_runtime({"family": "qwen3_coder"}) is True
 
 
+def test_modal_gpu_mapping_prefers_modal_labels():
+    assert modal_service._modal_gpu_value("H100_80GB") == "H100"
+    assert modal_service._modal_gpu_value("H200_141GB") == "H100"
+    assert modal_service._modal_gpu_value("A100_80GB") == "A100-80GB"
+
+
 @pytest.mark.asyncio
 async def test_get_status_uses_health_probe(monkeypatch):
     class FakeResponse:

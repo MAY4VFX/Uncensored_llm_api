@@ -24,19 +24,31 @@ def _provider_config(model: LlmModel) -> dict[str, Any]:
     return dict(model.provider_config or {})
 
 
+def _modal_gpu_value(value: str | None) -> str:
+    gpu = (value or "").strip()
+    mapping = {
+        "RTX_4000_Ada_20GB": "A10G",
+        "RTX_A5000_24GB": "A10G",
+        "A100_80GB": "A100-80GB",
+        "H100_80GB": "H100",
+        "H200_141GB": "H100",
+    }
+    return mapping.get(gpu, gpu or "H100")
+
+
 def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | None = None) -> dict[str, str]:
     config = _provider_config(model)
     app_name = config.get("app_name") or f"{settings.modal_app_prefix}-{model.slug}"
     function_name = config.get("function_name") or "openai_api"
     volume_name = config.get("volume_name") or f"{app_name}-weights"
-    runtime_image = config.get("image") or default_image or settings.modal_app_prefix
+    runtime_image = config.get("image") or default_image or ""
 
     env = {
         "MODAL_APP_NAME": app_name,
         "MODAL_FUNCTION_NAME": function_name,
         "MODAL_MODEL_NAME": model.hf_repo,
         "MODAL_MAX_MODEL_LEN": str(profile.get("target_context") or model.max_context_length or 4096),
-        "MODAL_GPU": str(config.get("gpu") or profile.get("gpu_type") or model.gpu_type),
+        "MODAL_GPU": _modal_gpu_value(str(config.get("gpu") or profile.get("gpu_type") or model.gpu_type)),
         "MODAL_TIMEOUT_SECONDS": str(config.get("timeout_seconds") or 3600),
         "MODAL_STARTUP_TIMEOUT_SECONDS": str(config.get("startup_timeout_seconds") or profile.get("runpod_init_timeout") or 1800),
         "MODAL_SCALEDOWN_WINDOW_SECONDS": str(config.get("scaledown_window_seconds") or 300),
