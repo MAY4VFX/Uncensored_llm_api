@@ -15,9 +15,8 @@ from app.models.user import User
 from app.schemas.openai import ChatCompletionRequest
 from app.services import proxy_service
 from app.services.credits_service import check_credits, deduct_credits
-from app.services.usage_service import (
-    calculate_gpu_cost, count_message_tokens, estimate_max_cost, log_usage,
-)
+from app.services.provider_service import MODAL, RUNPOD, resolve_model_provider
+from app.services.usage_service import calculate_gpu_cost, count_message_tokens, estimate_max_cost, log_usage
 
 router = APIRouter(prefix="/playground", tags=["playground"])
 
@@ -28,20 +27,20 @@ async def playground_chat(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Chat endpoint for the playground — uses JWT auth instead of API key."""
-    result = await db.execute(
-        select(LlmModel).where(LlmModel.slug == request.model, LlmModel.status == "active")
-    )
+    result = await db.execute(select(LlmModel).where(LlmModel.slug == request.model, LlmModel.status == "active"))
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail=f"Model '{request.model}' not found or not active")
 
-    if not model.runpod_endpoint_id:
+    provider = await resolve_model_provider(model, db)
+    if provider == RUNPOD and not model.runpod_endpoint_id:
         raise HTTPException(status_code=503, detail=f"Model '{request.model}' endpoint not configured")
+    if provider == MODAL and not model.deployment_ref:
+        raise HTTPException(status_code=503, detail=f"Model '{request.model}' deployment not configured")
+    if provider == MODAL:
+        raise HTTPException(status_code=501, detail="Modal playground path is not enabled yet; keep canary models pinned to RunPod.")
 
-    tokens_in_estimate = count_message_tokens(
-        [{"role": m.role, "content": m.content} for m in request.messages]
-    )
+    tokens_in_estimate = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
     max_ctx = model.max_context_length or 4096
 
     max_possible_output = max(1, max_ctx - tokens_in_estimate)
@@ -50,7 +49,6 @@ async def playground_chat(
     else:
         request.max_tokens = max_possible_output
 
-    # Pre-auth: estimate max GPU cost
     gpu_hourly = float(model.gpu_hourly_cost or 0)
     margin = float(model.margin_multiplier or 1.5)
     estimated_cost = estimate_max_cost(request.max_tokens, gpu_hourly, margin)
@@ -75,7 +73,6 @@ async def _stream_playground(
     user: User,
     db: AsyncSession,
 ):
-    """Stream response and bill by GPU time."""
     gpu_hourly = float(model.gpu_hourly_cost or 0)
     margin = float(model.margin_multiplier or 1.5)
 
@@ -98,12 +95,8 @@ async def _stream_playground(
     gpu_end = time.monotonic()
     gpu_seconds = (gpu_end - gpu_start) if gpu_start else 0.0
 
-    tokens_in = count_message_tokens(
-        [{"role": m.role, "content": m.content} for m in request.messages]
-    )
-    tokens_out = count_message_tokens(
-        [{"role": "assistant", "content": "".join(full_output)}]
-    ) if full_output else 0
+    tokens_in = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
+    tokens_out = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}]) if full_output else 0
 
     actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
     await deduct_credits(db, user.id, actual_cost)
