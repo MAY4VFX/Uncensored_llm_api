@@ -17,7 +17,13 @@ def _get_env(name: str, default: str = "") -> str:
 
 def _build_image() -> modal.Image:
     runtime_image = _get_env("MODAL_RUNTIME_IMAGE") or "vllm/vllm-openai:v0.19.1"
-    return modal.Image.from_registry(runtime_image).entrypoint([])
+    return modal.Image.from_registry(
+        runtime_image,
+        setup_dockerfile_commands=[
+            "ENV PYTHONUNBUFFERED=1",
+            "RUN ln -sf $(which python3) /usr/local/bin/python || true",
+        ],
+    ).entrypoint([])
 
 
 APP_NAME = _get_env("MODAL_APP_NAME") or "unchained-modal-app"
