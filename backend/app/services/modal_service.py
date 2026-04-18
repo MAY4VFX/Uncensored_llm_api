@@ -267,49 +267,69 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
     served_model = model.hf_repo
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
-        async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
-            response.raise_for_status()
-            buf = ""
-            async for chunk in response.aiter_text():
-                buf += chunk
-                while "\n\n" in buf:
-                    frame, buf = buf.split("\n\n", 1)
-                    for line in frame.split("\n"):
-                        if not line.startswith("data: "):
-                            continue
-                        data = line[6:].strip()
-                        if data == "[DONE]":
-                            continue
-                        try:
-                            obj = json.loads(data)
-                        except Exception:
-                            continue
-                        response_id = obj.get("id") or response_id
-                        created = obj.get("created") or created
-                        served_model = obj.get("model") or served_model
-                        if obj.get("usage"):
-                            usage = obj["usage"]
-                        for ch in obj.get("choices", []) or []:
-                            delta = ch.get("delta", {}) or {}
-                            if delta.get("content"):
-                                content_parts.append(delta["content"])
-                            if delta.get("reasoning"):
-                                reasoning_parts.append(delta["reasoning"])
-                            for tc in delta.get("tool_calls") or []:
-                                idx = tc.get("index", 0)
-                                slot = tool_calls_acc.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                                if tc.get("id"):
-                                    slot["id"] = tc["id"]
-                                if tc.get("type"):
-                                    slot["type"] = tc["type"]
-                                fn = tc.get("function") or {}
-                                if fn.get("name"):
-                                    slot["function"]["name"] += fn["name"]
-                                if fn.get("arguments") is not None:
-                                    slot["function"]["arguments"] += fn["arguments"]
-                            if ch.get("finish_reason"):
-                                finish_reason = ch["finish_reason"]
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        chunks_received = 0
+        content_parts.clear() if content_parts else None
+        reasoning_parts.clear() if reasoning_parts else None
+        tool_calls_acc.clear()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
+                async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
+                    response.raise_for_status()
+                    buf = ""
+                    async for chunk in response.aiter_text():
+                        chunks_received += 1
+                        buf += chunk
+                        while "\n\n" in buf:
+                            frame, buf = buf.split("\n\n", 1)
+                            for line in frame.split("\n"):
+                                if not line.startswith("data: "):
+                                    continue
+                                data = line[6:].strip()
+                                if data == "[DONE]":
+                                    continue
+                                try:
+                                    obj = json.loads(data)
+                                except Exception:
+                                    continue
+                                response_id = obj.get("id") or response_id
+                                created = obj.get("created") or created
+                                served_model = obj.get("model") or served_model
+                                if obj.get("usage"):
+                                    usage = obj["usage"]
+                                for ch in obj.get("choices", []) or []:
+                                    delta = ch.get("delta", {}) or {}
+                                    if delta.get("content"):
+                                        content_parts.append(delta["content"])
+                                    if delta.get("reasoning"):
+                                        reasoning_parts.append(delta["reasoning"])
+                                    for tc in delta.get("tool_calls") or []:
+                                        idx = tc.get("index", 0)
+                                        slot = tool_calls_acc.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                                        if tc.get("id"):
+                                            slot["id"] = tc["id"]
+                                        if tc.get("type"):
+                                            slot["type"] = tc["type"]
+                                        fn = tc.get("function") or {}
+                                        if fn.get("name"):
+                                            slot["function"]["name"] += fn["name"]
+                                        if fn.get("arguments") is not None:
+                                            slot["function"]["arguments"] += fn["arguments"]
+                                    if ch.get("finish_reason"):
+                                        finish_reason = ch["finish_reason"]
+            if chunks_received == 0:
+                last_exc = RuntimeError("Modal returned empty stream")
+                await asyncio.sleep(2 + attempt * 3)
+                continue
+            last_exc = None
+            break
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            await asyncio.sleep(2 + attempt * 3)
+            continue
+    if last_exc is not None and not (content_parts or reasoning_parts or tool_calls_acc):
+        raise ModalProviderError(f"Modal failed after retries: {type(last_exc).__name__}: {last_exc}")
 
     message = {"role": "assistant", "content": "".join(content_parts) or None}
     if reasoning_parts:
@@ -350,13 +370,19 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
     async def _producer():
         last_exc = None
         for attempt in range(3):
+            chunks_received = 0
             try:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
                     async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
                         response.raise_for_status()
                         async for chunk in response.aiter_text():
                             if chunk:
+                                chunks_received += 1
                                 await queue.put(chunk)
+                if chunks_received == 0:
+                    last_exc = RuntimeError("Modal returned empty stream")
+                    await asyncio.sleep(2 + attempt * 3)
+                    continue
                 last_exc = None
                 break
             except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
