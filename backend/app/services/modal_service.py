@@ -31,7 +31,8 @@ def _modal_gpu_value(value: str | None) -> str:
         "RTX_A5000_24GB": "A10G",
         "A100_80GB": "A100-80GB",
         "H100_80GB": "H100",
-        "H200_141GB": "H100",
+        "H200_141GB": "H200",
+        "H200_143GB": "H200",
     }
     return mapping.get(gpu, gpu or "H100")
 
