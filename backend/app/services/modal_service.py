@@ -49,7 +49,7 @@ def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | No
         "MODAL_FUNCTION_NAME": function_name,
         "MODAL_MODEL_NAME": model.hf_repo,
         "MODAL_MAX_MODEL_LEN": str(profile.get("target_context") or model.max_context_length or 4096),
-        "MODAL_GPU": _modal_gpu_value(str(config.get("gpu") or profile.get("gpu_type") or model.gpu_type)),
+        "MODAL_GPU": _modal_gpu_value(str(profile.get("gpu_type") or model.gpu_type or config.get("gpu"))),
         "MODAL_TIMEOUT_SECONDS": str(config.get("timeout_seconds") or 3600),
         "MODAL_STARTUP_TIMEOUT_SECONDS": str(config.get("startup_timeout_seconds") or profile.get("runpod_init_timeout") or 1800),
         "MODAL_SCALEDOWN_WINDOW_SECONDS": str(config.get("scaledown_window_seconds") or 300),
