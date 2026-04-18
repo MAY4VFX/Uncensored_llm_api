@@ -165,7 +165,12 @@ async def disable_model(model: LlmModel) -> dict[str, Any]:
     }
 
 
+_STATUS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_STATUS_TTL = 15.0
+
+
 async def get_status(model: LlmModel) -> dict[str, Any]:
+    import time
     config = _provider_config(model)
     web_url = config.get("web_url")
     if not web_url:
@@ -176,28 +181,37 @@ async def get_status(model: LlmModel) -> dict[str, Any]:
             "throttled": 0,
             "message": "Modal deployment URL is not configured",
         }
+    cached = _STATUS_CACHE.get(web_url)
+    if cached and time.time() - cached[0] < _STATUS_TTL:
+        return cached[1]
+
     health_url = web_url.rstrip("/") + "/health"
+    result: dict[str, Any]
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=8.0, read=8.0, write=8.0, pool=None)) as client:
             response = await client.get(health_url)
             if response.status_code == 200:
-                return {
+                result = {
                     "status": "ready",
                     "estimated_wait_seconds": 0,
                     "workers_ready": 1,
                     "throttled": 0,
                     "message": "Modal container ready",
                 }
+                _STATUS_CACHE[web_url] = (time.time(), result)
+                return result
     except Exception:
         pass
     eta = 240 if (model.params_b or 0) >= 100 else 90
-    return {
+    result = {
         "status": "warming_up",
         "estimated_wait_seconds": eta,
         "workers_ready": 0,
         "throttled": 0,
         "message": f"Modal cold-start (~{eta // 60} min)",
     }
+    _STATUS_CACHE[web_url] = (time.time(), result)
+    return result
 
 
 def _modal_web_url(model: LlmModel) -> str:
