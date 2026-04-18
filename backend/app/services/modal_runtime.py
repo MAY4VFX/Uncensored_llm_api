@@ -81,7 +81,7 @@ def _server_command() -> list[str]:
     ]
     if TOOL_PARSER and TOOL_PARSER != "none":
         command.extend(["--tool-call-parser", TOOL_PARSER, "--enable-auto-tool-choice"])
-    if REASONING_PARSER and REASONING_PARSER != "openai_gptoss":
+    if REASONING_PARSER:
         command.extend(["--reasoning-parser", REASONING_PARSER])
     if GPU_MEMORY_UTILIZATION:
         command.extend(["--gpu-memory-utilization", GPU_MEMORY_UTILIZATION])
@@ -144,7 +144,7 @@ def _server_command_with(env: dict) -> list[str]:
     ]
     if tool_parser and tool_parser != "none":
         command.extend(["--tool-call-parser", tool_parser, "--enable-auto-tool-choice"])
-    if reasoning_parser and reasoning_parser != "openai_gptoss":
+    if reasoning_parser:
         command.extend(["--reasoning-parser", reasoning_parser])
     if gpu_mem_util:
         command.extend(["--gpu-memory-utilization", str(gpu_mem_util)])

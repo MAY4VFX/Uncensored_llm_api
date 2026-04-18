@@ -208,6 +208,21 @@ def _modal_web_url(model: LlmModel) -> str:
     return str(web_url).rstrip("/")
 
 
+def _patch_gpt_oss_stops(payload: dict, model: LlmModel) -> None:
+    # Same workaround as proxy_service for RunPod path: gpt-oss harmony
+    # parser crashes with HarmonyError when model emits 200012 (<|call|>)
+    # without 199999 (<|return|>) in the EOS list. Inject both stop tokens
+    # so vLLM ends generation at the OpenAI-intended point.
+    repo = (model.hf_repo or "").lower()
+    if "gpt-oss" not in repo and "gpt_oss" not in repo:
+        return
+    existing = payload.get("stop_token_ids") or []
+    for tid in (199999, 200012):
+        if tid not in existing:
+            existing.append(tid)
+    payload["stop_token_ids"] = existing
+
+
 async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str, Any]:
     payload = {
         "model": model.hf_repo,
@@ -223,6 +238,7 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
         payload["tool_choice"] = request.tool_choice
     if request.response_format is not None:
         payload["response_format"] = request.response_format
+    _patch_gpt_oss_stops(payload, model)
     async with httpx.AsyncClient(timeout=600) as client:
         response = await client.post(_modal_web_url(model) + "/v1/chat/completions", json=payload)
         response.raise_for_status()
@@ -245,6 +261,7 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
         payload["tool_choice"] = request.tool_choice
     if request.response_format is not None:
         payload["response_format"] = request.response_format
+    _patch_gpt_oss_stops(payload, model)
 
     queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
 
