@@ -111,6 +111,7 @@ def _server_command() -> list[str]:
     volumes={"/cache": volume},
     secrets=[secret] if secret else [],
 )
+@modal.concurrent(max_inputs=100)
 @modal.web_server(8000, startup_timeout=STARTUP_TIMEOUT)
 def openai_api():
     env = os.environ.copy()
