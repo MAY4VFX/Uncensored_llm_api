@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.keep_warm import KeepWarm
 from app.models.llm_model import LlmModel
-from app.services import runpod_service
+from app.services import modal_service, runpod_service
 from app.services.credits_service import check_credits, deduct_credits
-from app.services.provider_service import RUNPOD, resolve_model_provider
+from app.services.provider_service import MODAL, RUNPOD, resolve_model_provider
 from app.services.runpod_service import GPU_HOURLY_COST
 
 logger = logging.getLogger(__name__)
@@ -30,13 +30,17 @@ def get_keep_warm_price(model: LlmModel) -> float:
 
 async def _supports_keep_warm(db: AsyncSession, model: LlmModel) -> bool:
     provider = await resolve_model_provider(model, db)
-    return provider == RUNPOD and bool(model.runpod_endpoint_id)
+    if provider == RUNPOD:
+        return bool(model.runpod_endpoint_id)
+    if provider == MODAL:
+        return bool((model.provider_config or {}).get("app_name"))
+    return False
 
 
 async def _provider_payload(db: AsyncSession, model: LlmModel) -> dict:
     provider = await resolve_model_provider(model, db)
-    supported = provider == RUNPOD and bool(model.runpod_endpoint_id)
-    message = None if supported else f"Keep warm is not available for provider '{provider}' in v1"
+    supported = await _supports_keep_warm(db, model)
+    message = None if supported else f"Keep warm is not available for provider '{provider}'"
     return {
         "provider": provider,
         "supported": supported,
@@ -54,10 +58,14 @@ async def _sync_workers_min(db: AsyncSession, model: LlmModel) -> int:
     active_count = result.scalar() or 0
 
     if await _supports_keep_warm(db, model):
+        provider = await resolve_model_provider(model, db)
         try:
-            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, active_count)
+            if provider == RUNPOD:
+                await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, active_count)
+            elif provider == MODAL:
+                await modal_service.update_min_containers(model, active_count)
         except Exception as e:
-            logger.error(f"Failed to set workersMin={active_count} for {model.slug}: {e}")
+            logger.error(f"Failed to set min={active_count} for {model.slug}: {e}")
 
     return active_count
 
@@ -188,7 +196,7 @@ async def tick_billing(db: AsyncSession) -> None:
 
     for kw, model in rows:
         provider = await resolve_model_provider(model, db)
-        if provider != RUNPOD:
+        if provider not in (RUNPOD, MODAL):
             continue
 
         elapsed_seconds = (now - kw.last_billed_at).total_seconds()
