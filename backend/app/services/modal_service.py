@@ -52,7 +52,7 @@ def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | No
         "MODAL_GPU": _modal_gpu_value(str(profile.get("gpu_type") or model.gpu_type or config.get("gpu"))),
         "MODAL_TIMEOUT_SECONDS": str(config.get("timeout_seconds") or 3600),
         "MODAL_STARTUP_TIMEOUT_SECONDS": str(config.get("startup_timeout_seconds") or profile.get("runpod_init_timeout") or 1800),
-        "MODAL_SCALEDOWN_WINDOW_SECONDS": str(config.get("scaledown_window_seconds") or 300),
+        "MODAL_SCALEDOWN_WINDOW_SECONDS": str(config.get("scaledown_window_seconds") or 600),
         "MODAL_MIN_CONTAINERS": str(config.get("min_containers") or 0),
         "MODAL_MAX_CONTAINERS": str(config.get("max_containers") or max(1, model.gpu_count or 1)),
         "MODAL_BUFFER_CONTAINERS": str(config.get("buffer_containers") or 0),
@@ -122,6 +122,28 @@ async def deploy_model(model: LlmModel, profile: dict[str, Any], default_image: 
 
 async def redeploy_model(model: LlmModel, profile: dict[str, Any], default_image: str | None = None) -> dict[str, Any]:
     return await deploy_model(model, profile, default_image=default_image)
+
+
+async def update_min_containers(model: LlmModel, count: int) -> bool:
+    if not settings.modal_enabled:
+        raise ModalProviderError("Modal credentials are not configured")
+    config = _provider_config(model)
+    app_name = config.get("app_name") or f"{settings.modal_app_prefix}-{model.slug}"
+    function_name = config.get("function_name") or "openai_api"
+    env_name = config.get("environment") or settings.modal_environment
+    proc = subprocess.run(
+        ["python", "-c",
+         "import sys, modal; "
+         "fn = modal.Function.from_name(sys.argv[1], sys.argv[2], environment_name=sys.argv[3]); "
+         "fn.update_autoscaler(min_containers=int(sys.argv[4]))",
+         app_name, function_name, env_name, str(count)],
+        capture_output=True, text=True,
+        env={**os.environ, **settings.modal_secrets_env},
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ModalProviderError(proc.stderr.strip() or proc.stdout.strip() or "update_autoscaler failed")
+    return True
 
 
 async def disable_model(model: LlmModel) -> dict[str, Any]:
