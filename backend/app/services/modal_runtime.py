@@ -86,8 +86,6 @@ def _server_command() -> list[str]:
         command.extend(["--reasoning-parser", REASONING_PARSER])
     if GPU_MEMORY_UTILIZATION:
         command.extend(["--gpu-memory-utilization", GPU_MEMORY_UTILIZATION])
-    if DEFAULT_TEMPERATURE:
-        command.extend(["--temperature", DEFAULT_TEMPERATURE])
     if ENFORCE_EAGER:
         command.append("--enforce-eager")
     if GENERATION_CONFIG:
@@ -151,8 +149,6 @@ def _server_command_with(env: dict) -> list[str]:
         command.extend(["--reasoning-parser", reasoning_parser])
     if gpu_mem_util:
         command.extend(["--gpu-memory-utilization", str(gpu_mem_util)])
-    if default_temp:
-        command.extend(["--temperature", str(default_temp)])
     if enforce_eager:
         command.append("--enforce-eager")
     if generation_config:
