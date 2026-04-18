@@ -224,13 +224,17 @@ def _patch_gpt_oss_stops(payload: dict, model: LlmModel) -> None:
 
 
 async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str, Any]:
+    # vLLM 0.19.1 with openai_gptoss reasoning parser crashes in
+    # chat_completion_full_generator (HarmonyError on bad first tokens).
+    # Always stream from vLLM and accumulate locally to bypass the
+    # non-stream harmony path. Returned shape stays OpenAI-compat.
     payload = {
         "model": model.hf_repo,
         "messages": [{"role": m.role, "content": m.content} for m in request.messages],
         "temperature": request.temperature,
         "max_tokens": request.max_tokens or 4096,
         "top_p": request.top_p,
-        "stream": False,
+        "stream": True,
     }
     if request.tools:
         payload["tools"] = request.tools
@@ -239,10 +243,63 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
     if request.response_format is not None:
         payload["response_format"] = request.response_format
     _patch_gpt_oss_stops(payload, model)
-    async with httpx.AsyncClient(timeout=600) as client:
-        response = await client.post(_modal_web_url(model) + "/v1/chat/completions", json=payload)
-        response.raise_for_status()
-        return response.json()
+
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_calls: list[dict] = []
+    finish_reason = "stop"
+    response_id = ""
+    created = 0
+    served_model = model.hf_repo
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
+        async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
+            response.raise_for_status()
+            buf = ""
+            async for chunk in response.aiter_text():
+                buf += chunk
+                while "\n\n" in buf:
+                    frame, buf = buf.split("\n\n", 1)
+                    for line in frame.split("\n"):
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[6:].strip()
+                        if data == "[DONE]":
+                            continue
+                        try:
+                            obj = json.loads(data)
+                        except Exception:
+                            continue
+                        response_id = obj.get("id") or response_id
+                        created = obj.get("created") or created
+                        served_model = obj.get("model") or served_model
+                        if obj.get("usage"):
+                            usage = obj["usage"]
+                        for ch in obj.get("choices", []) or []:
+                            delta = ch.get("delta", {}) or {}
+                            if delta.get("content"):
+                                content_parts.append(delta["content"])
+                            if delta.get("reasoning"):
+                                reasoning_parts.append(delta["reasoning"])
+                            if delta.get("tool_calls"):
+                                tool_calls.extend(delta["tool_calls"])
+                            if ch.get("finish_reason"):
+                                finish_reason = ch["finish_reason"]
+
+    message = {"role": "assistant", "content": "".join(content_parts) or None}
+    if reasoning_parts:
+        message["reasoning"] = "".join(reasoning_parts)
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    return {
+        "id": response_id or "chatcmpl-modal",
+        "object": "chat.completion",
+        "created": created,
+        "model": served_model,
+        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+        "usage": usage,
+    }
 
 
 async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
