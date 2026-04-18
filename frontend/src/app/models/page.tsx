@@ -10,6 +10,7 @@ import {
   getMe,
   getProviderSettings,
   listAllModels,
+  updateProviderSettings,
   listProviders,
   ProviderOption,
   ProviderSettings,
