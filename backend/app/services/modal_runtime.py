@@ -53,6 +53,9 @@ RUNTIME_ARGS = _get_env("MODAL_RUNTIME_ARGS_JSON", "{}")
 RUNTIME_ARGS_DICT = json.loads(RUNTIME_ARGS) if RUNTIME_ARGS else {}
 ENVIRONMENT_NAME = _get_env("MODAL_ENVIRONMENT", "main")
 
+_TP = int(RUNTIME_ARGS_DICT.get("tensor_parallel_size") or 1)
+GPU_SPEC = f"{GPU}:{_TP}" if _TP > 1 else GPU
+
 _RUNTIME_ENV = {
     k: os.environ[k]
     for k in os.environ
@@ -102,7 +105,7 @@ def _server_command() -> list[str]:
 
 @app.function(
     image=image,
-    gpu=GPU,
+    gpu=GPU_SPEC,
     timeout=TIMEOUT,
     startup_timeout=STARTUP_TIMEOUT,
     scaledown_window=SCALEDOWN_WINDOW,
