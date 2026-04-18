@@ -147,7 +147,7 @@ async def get_status(model: LlmModel) -> dict[str, Any]:
         }
     health_url = web_url.rstrip("/") + "/health"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=3) as client:
             response = await client.get(health_url)
             if response.status_code == 200:
                 return {
@@ -155,16 +155,17 @@ async def get_status(model: LlmModel) -> dict[str, Any]:
                     "estimated_wait_seconds": 0,
                     "workers_ready": 1,
                     "throttled": 0,
-                    "message": None,
+                    "message": "Modal container ready",
                 }
     except Exception:
         pass
+    eta = 240 if (model.params_b or 0) >= 100 else 90
     return {
-        "status": model.provider_status or "provisioning",
-        "estimated_wait_seconds": 0,
+        "status": "warming_up",
+        "estimated_wait_seconds": eta,
         "workers_ready": 0,
         "throttled": 0,
-        "message": "Modal deployment is not responding yet",
+        "message": f"Modal cold-start (~{eta // 60} min)",
     }
 
 
@@ -198,6 +199,7 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
 
 
 async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
+    import asyncio
     payload = {
         "model": model.hf_repo,
         "messages": [{"role": m.role, "content": m.content} for m in request.messages],
@@ -213,9 +215,32 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
     if request.response_format is not None:
         payload["response_format"] = request.response_format
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
-            response.raise_for_status()
-            async for chunk in response.aiter_text():
-                if chunk:
-                    yield chunk
+    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+
+    async def _producer():
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
+                async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_text():
+                        if chunk:
+                            await queue.put(chunk)
+        except Exception as exc:
+            await queue.put(f"data: {{\"error\":\"{type(exc).__name__}: {str(exc)[:200]}\"}}\n\n")
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(_producer())
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=10.0)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if chunk is None:
+                break
+            yield chunk
+    finally:
+        if not task.done():
+            task.cancel()
