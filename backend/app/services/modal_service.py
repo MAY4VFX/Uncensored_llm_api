@@ -337,17 +337,27 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
     queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
 
     async def _producer():
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
-                async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
-                    response.raise_for_status()
-                    async for chunk in response.aiter_text():
-                        if chunk:
-                            await queue.put(chunk)
-        except Exception as exc:
-            await queue.put(f"data: {{\"error\":\"{type(exc).__name__}: {str(exc)[:200]}\"}}\n\n")
-        finally:
-            await queue.put(None)
+        last_exc = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
+                    async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
+                        response.raise_for_status()
+                        async for chunk in response.aiter_text():
+                            if chunk:
+                                await queue.put(chunk)
+                last_exc = None
+                break
+            except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+                last_exc = exc
+                await asyncio.sleep(2 + attempt * 3)
+                continue
+            except Exception as exc:
+                last_exc = exc
+                break
+        if last_exc is not None:
+            await queue.put(f"data: {{\"error\":\"{type(last_exc).__name__}: {str(last_exc)[:200]}\"}}\n\n")
+        await queue.put(None)
 
     task = asyncio.create_task(_producer())
     try:
