@@ -37,6 +37,7 @@ from app.schemas.model import (
 from app.services.deploy_profile_service import resolve_deploy_profile
 from app.services.modal_service import disable_model as disable_modal_model
 from app.services.modal_service import deploy_model as deploy_modal_model
+from app.services.modal_service import get_status as get_modal_status
 from app.services.modal_service import redeploy_model as redeploy_modal_model
 from app.services.modal_service import supports_runtime as modal_supports_runtime
 from app.services.provider_service import (
@@ -449,10 +450,10 @@ async def _deploy_runpod_model(model: LlmModel, profile: dict, db: AsyncSession)
     return endpoint_id, endpoint_id
 
 
-async def _deploy_modal_model(model: LlmModel, profile: dict, db: AsyncSession) -> tuple[str | None, str | None]:
+async def _deploy_modal_model(model: LlmModel, profile: dict, db: AsyncSession) -> tuple[str | None, str | None, dict | None, str | None]:
     settings = await get_or_create_app_settings(db)
     result = await deploy_modal_model(model, profile, default_image=settings.modal_default_image)
-    return None, result.get("deployment_ref")
+    return None, result.get("deployment_ref"), result.get("provider_config"), result.get("provider_status")
 
 
 @router.post("/models/{model_id}/deploy", response_model=DeployModelResponse)
@@ -484,11 +485,12 @@ async def deploy_model(
         model.max_context_length = profile["target_context"]
 
         if provider == MODAL:
-            endpoint_id, deployment_ref = await _deploy_modal_model(model, profile, db)
+            endpoint_id, deployment_ref, provider_config, provider_status = await _deploy_modal_model(model, profile, db)
             model.runpod_endpoint_id = None
             model.deployment_ref = deployment_ref
-            model.provider_status = "provisioning"
-            model.status = "inactive"
+            model.provider_config = provider_config
+            model.provider_status = provider_status or "provisioning"
+            model.status = "active" if model.provider_status == "active" else "inactive"
         else:
             endpoint_id, deployment_ref = await _deploy_runpod_model(model, profile, db)
             model.runpod_endpoint_id = endpoint_id
@@ -550,8 +552,9 @@ async def redeploy_model(
             result = await redeploy_modal_model(model, profile)
             model.runpod_endpoint_id = None
             model.deployment_ref = result.get("deployment_ref")
+            model.provider_config = result.get("provider_config")
             model.provider_status = result.get("provider_status", "provisioning")
-            model.status = "inactive"
+            model.status = "active" if model.provider_status == "active" else "inactive"
         else:
             endpoint_id, deployment_ref = await _deploy_runpod_model(model, profile, db)
             model.runpod_endpoint_id = endpoint_id
@@ -608,6 +611,7 @@ async def update_model_status(
         elif provider == MODAL:
             result = await disable_modal_model(model)
             model.deployment_ref = result.get("deployment_ref")
+            model.provider_config = result.get("provider_config")
             model.provider_status = result.get("provider_status", "inactive")
 
     model.status = request.status

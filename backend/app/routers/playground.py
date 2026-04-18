@@ -13,7 +13,7 @@ from app.dependencies import get_current_user
 from app.models.llm_model import LlmModel
 from app.models.user import User
 from app.schemas.openai import ChatCompletionRequest
-from app.services import proxy_service
+from app.services import modal_service, proxy_service
 from app.services.credits_service import check_credits, deduct_credits
 from app.services.provider_service import MODAL, RUNPOD, resolve_model_provider
 from app.services.usage_service import calculate_gpu_cost, count_message_tokens, estimate_max_cost, log_usage
@@ -37,8 +37,6 @@ async def playground_chat(
         raise HTTPException(status_code=503, detail=f"Model '{request.model}' endpoint not configured")
     if provider == MODAL and not model.deployment_ref:
         raise HTTPException(status_code=503, detail=f"Model '{request.model}' deployment not configured")
-    if provider == MODAL:
-        raise HTTPException(status_code=501, detail="Modal playground path is not enabled yet; keep canary models pinned to RunPod.")
 
     tokens_in_estimate = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
     max_ctx = model.max_context_length or 4096
@@ -56,8 +54,9 @@ async def playground_chat(
     if not await check_credits(db, user.id, estimated_cost):
         raise HTTPException(status_code=402, detail="Insufficient credits")
 
+    stream_fn = _stream_modal_playground if provider == MODAL else _stream_playground
     return StreamingResponse(
-        _stream_playground(request, model, user, db),
+        stream_fn(request, model, user, db),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",
@@ -65,6 +64,42 @@ async def playground_chat(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+async def _stream_modal_playground(
+    request: ChatCompletionRequest,
+    model: LlmModel,
+    user: User,
+    db: AsyncSession,
+):
+    gpu_hourly = float(model.gpu_hourly_cost or 0)
+    margin = float(model.margin_multiplier or 1.5)
+
+    full_output = []
+    gpu_start = None
+
+    async for chunk in modal_service.stream_chat(request, model):
+        if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+            try:
+                data = json.loads(chunk[6:])
+                content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                if content:
+                    if gpu_start is None:
+                        gpu_start = time.monotonic()
+                    full_output.append(content)
+            except (ValueError, IndexError, KeyError):
+                pass
+        yield chunk
+
+    gpu_end = time.monotonic()
+    gpu_seconds = (gpu_end - gpu_start) if gpu_start else 0.0
+
+    tokens_in = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
+    tokens_out = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}]) if full_output else 0
+
+    actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
+    await deduct_credits(db, user.id, actual_cost)
+    await log_usage(db, user.id, None, model.id, tokens_in, tokens_out, actual_cost, gpu_seconds)
 
 
 async def _stream_playground(
