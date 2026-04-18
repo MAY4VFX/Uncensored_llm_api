@@ -9,6 +9,7 @@ interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning?: string;
 }
 
 interface ModelOption {
@@ -462,7 +463,8 @@ export default function PlaygroundPage() {
                 }
 
                 const delta = parsed.choices?.[0]?.delta?.content;
-                if (delta) {
+                const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning;
+                if (delta || reasoningDelta) {
                   if (!firstTokenReceived) {
                     firstTokenReceived = true;
                     setWorkerStatus("ready");
@@ -471,7 +473,11 @@ export default function PlaygroundPage() {
                     prev.map((m) => {
                       if (m.id !== assistantId) return m;
                       const isStatus = m.content.startsWith("Waiting ") || m.content.startsWith("Worker ") || m.content.startsWith("Status:") || m.content.startsWith("Processing");
-                      return { ...m, content: (isStatus ? "" : m.content) + delta };
+                      return {
+                        ...m,
+                        content: (isStatus ? "" : m.content) + (delta || ""),
+                        reasoning: (m.reasoning || "") + (reasoningDelta || ""),
+                      };
                     })
                   );
                 }
@@ -716,6 +722,14 @@ export default function PlaygroundPage() {
                 {m.role === "user" ? "you" : "model"}
               </span>
               <div className="flex-1 min-w-0">
+                {m.role === "assistant" && m.reasoning && (
+                  <details open={!m.content} className="mb-2 text-xs font-mono text-neutral-500 border-l-2 border-neutral-700 pl-3">
+                    <summary className="cursor-pointer text-neutral-400 hover:text-neutral-200 select-none">
+                      {m.content ? "thinking" : "thinking..."}
+                    </summary>
+                    <div className="mt-1 whitespace-pre-wrap break-words leading-relaxed">{m.reasoning}</div>
+                  </details>
+                )}
                 <div className="text-sm text-neutral-300 font-mono whitespace-pre-wrap break-words leading-relaxed">
                   {m.role === "assistant"
                     ? renderMessageContent(m.content, isStreaming)
