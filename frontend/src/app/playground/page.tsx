@@ -17,7 +17,7 @@ interface ModelOption {
   maxContext: number;
 }
 
-type WorkerStatus = "ready" | "idle" | "sleep" | "warming_up" | "throttled" | "unknown" | "loading" | null;
+type WorkerStatus = "ready" | "idle" | "sleep" | "warming_up" | "throttled" | "unknown" | "loading" | "unavailable" | null;
 
 // --- Think tag parser ---
 function ThinkBlock({ content }: { content: string }) {
@@ -104,13 +104,14 @@ function renderMessageContent(content: string, isStreaming: boolean) {
 }
 
 // --- Status bar ---
-function StatusBar({ status }: { status: WorkerStatus }) {
+function StatusBar({ status, message }: { status: WorkerStatus; message?: string }) {
   if (status === "ready" || status === "loading" || status === "unknown" || !status) return null;
 
   const config: Record<string, { text: string; color: string; spin: boolean }> = {
     sleep: { text: "Model is sleeping. Will wake on request.", color: "text-blue-400", spin: false },
     warming_up: { text: "Waking up model... (~1-2 min)", color: "text-yellow-400", spin: true },
     throttled: { text: "GPU unavailable. Try later.", color: "text-red-400", spin: false },
+    unavailable: { text: message || "Model is temporarily unavailable.", color: "text-surface-700", spin: false },
   };
   const c = config[status];
   if (!c) return null;
@@ -159,7 +160,9 @@ export default function PlaygroundPage() {
   const [keepWarm, setKeepWarm] = useState(false);
   const [keepWarmPrice, setKeepWarmPrice] = useState<number | null>(null);
   const [keepWarmLoading, setKeepWarmLoading] = useState(false);
+  const [keepWarmSupported, setKeepWarmSupported] = useState(false);
   const [warmWorkers, setWarmWorkers] = useState(0);
+  const [statusMessage, setStatusMessage] = useState("");
 
   // Auto-scroll refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -206,7 +209,6 @@ export default function PlaygroundPage() {
         const workersReady = data.workers_ready || 0;
         const throttled = data.throttled || 0;
 
-        // Map backend status to UI status based on actual worker state
         let mapped: WorkerStatus;
         if (workersReady > 0) {
           mapped = "ready";
@@ -218,8 +220,10 @@ export default function PlaygroundPage() {
           mapped = "throttled";
         } else if (s === "cold" || s === "unknown") {
           mapped = "sleep";
+        } else if (s === "unavailable" || s === "provisioning" || s === "inactive") {
+          mapped = "unavailable";
         } else {
-          mapped = s as WorkerStatus;
+          mapped = "unknown";
         }
 
         if (mapped === "sleep") {
@@ -275,20 +279,24 @@ export default function PlaygroundPage() {
     if (!selectedModel) {
       setKeepWarm(false);
       setKeepWarmPrice(null);
+      setKeepWarmSupported(false);
       setWarmWorkers(0);
+      setStatusMessage("");
       return;
     }
     const token = getToken();
     if (token) {
       getKeepWarm(token, selectedModel)
         .then((data) => {
+          setKeepWarmSupported(Boolean(data.supported));
           setKeepWarm(data.is_active);
-          setKeepWarmPrice(data.price_per_hour);
+          setKeepWarmPrice(data.supported ? data.price_per_hour : null);
           setWarmWorkers(data.warm_workers);
         })
         .catch(() => {
           setKeepWarm(false);
           setKeepWarmPrice(null);
+          setKeepWarmSupported(false);
           setWarmWorkers(0);
         });
     }
@@ -308,6 +316,7 @@ export default function PlaygroundPage() {
         const s = data.status as string;
         const workersReady = data.workers_ready || 0;
         const throttled = data.throttled || 0;
+        const message = data.message || "";
 
         let mapped: WorkerStatus;
         if (workersReady > 0) {
@@ -320,10 +329,13 @@ export default function PlaygroundPage() {
           mapped = "throttled";
         } else if (s === "cold" || s === "unknown") {
           mapped = "sleep";
+        } else if (s === "unavailable" || s === "provisioning" || s === "inactive") {
+          mapped = "unavailable";
         } else {
-          mapped = s as WorkerStatus;
+          mapped = "unknown";
         }
         setWorkerStatus(mapped);
+        setStatusMessage(mapped === "unavailable" ? "Selected model is not ready for requests yet." : "");
 
         if (mapped === "sleep") {
           // Pre-warm if sleeping
@@ -424,9 +436,20 @@ export default function PlaygroundPage() {
                       )
                     );
                   } else {
-                    if (statusMsg === "IN_QUEUE") setWorkerStatus("warming_up");
-                    else if (statusMsg === "IN_PROGRESS") setWorkerStatus("warming_up");
-                    else setWorkerStatus(statusMsg as WorkerStatus);
+                    if (statusMsg === "IN_QUEUE" || statusMsg === "IN_PROGRESS") {
+                      setWorkerStatus("warming_up");
+                    } else if (statusMsg === "unavailable" || statusMsg === "provisioning" || statusMsg === "inactive") {
+                      setWorkerStatus("unavailable");
+                    } else if (statusMsg === "ready") {
+                      setWorkerStatus("ready");
+                    } else {
+                      setWorkerStatus("unknown");
+                    }
+                    setStatusMessage(
+                      statusMsg === "unavailable" || statusMsg === "provisioning" || statusMsg === "inactive"
+                        ? "Selected model is not ready for requests yet."
+                        : ""
+                    );
                     setMessages((prev) =>
                       prev.map((m) =>
                         m.id === assistantId
@@ -531,7 +554,7 @@ export default function PlaygroundPage() {
     setSelectedModel(newModel);
   };
 
-  const inputDisabled = isStreaming || !selectedModel || workerStatus === "warming_up" || workerStatus === "throttled";
+  const inputDisabled = isStreaming || !selectedModel || workerStatus === "warming_up" || workerStatus === "throttled" || workerStatus === "unavailable";
 
   if (!user) return <div className="text-surface-800 font-mono text-sm p-8">Loading...</div>;
 
@@ -568,6 +591,8 @@ export default function PlaygroundPage() {
                   ? "text-yellow-400 border-yellow-800 bg-yellow-950/40"
                   : workerStatus === "throttled"
                   ? "text-red-400 border-red-800 bg-red-950/40"
+                  : workerStatus === "unavailable"
+                  ? "text-surface-700 border-surface-400 bg-surface-100"
                   : "text-surface-700 border-surface-400"
               }`}
             >
@@ -576,6 +601,7 @@ export default function PlaygroundPage() {
               {workerStatus === "sleep" && "Sleep"}
               {workerStatus === "warming_up" && "Warming up..."}
               {workerStatus === "throttled" && "Throttled"}
+              {workerStatus === "unavailable" && "Unavailable"}
               {workerStatus === "unknown" && "Status unknown"}
             </span>
           )}
@@ -593,7 +619,7 @@ export default function PlaygroundPage() {
             </button>
           )}
 
-          {selectedModel && keepWarmPrice !== null && keepWarmPrice > 0 && (
+          {selectedModel && keepWarmSupported && keepWarmPrice !== null && keepWarmPrice > 0 && (
             <button
               onClick={handleKeepWarmToggle}
               disabled={keepWarmLoading}
@@ -698,10 +724,12 @@ export default function PlaygroundPage() {
                     <span className="text-terminal-500 animate-blink">
                       {workerStatus === "sleep" || workerStatus === "warming_up" || workerStatus === "throttled"
                         ? "..."
+                        : workerStatus === "unavailable"
+                        ? ""
                         : "_"}
                     </span>
                   )}
-                  {m.role === "assistant" && isStreaming && m.content !== "" && !m.content.includes("<think>") && workerStatus !== "sleep" && workerStatus !== "warming_up" && workerStatus !== "throttled" && (
+                  {m.role === "assistant" && isStreaming && m.content !== "" && !m.content.includes("<think>") && workerStatus !== "sleep" && workerStatus !== "warming_up" && workerStatus !== "throttled" && workerStatus !== "unavailable" && (
                     <span className="text-terminal-500 animate-blink">|</span>
                   )}
                 </div>
@@ -723,7 +751,7 @@ export default function PlaygroundPage() {
       </div>
 
       {/* Status bar */}
-      <StatusBar status={workerStatus} />
+      <StatusBar status={workerStatus} message={statusMessage} />
 
       {/* Input */}
       <div className="border-t border-surface-300 px-6 py-4 shrink-0">
@@ -740,6 +768,8 @@ export default function PlaygroundPage() {
                   ? "Waiting for model to wake up..."
                   : workerStatus === "throttled"
                   ? "GPU unavailable..."
+                  : workerStatus === "unavailable"
+                  ? (statusMessage || "Selected model is not ready for requests yet.")
                   : "Type a message..."
               }
               disabled={inputDisabled}

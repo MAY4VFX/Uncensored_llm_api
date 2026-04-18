@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, Numeric, String, Text, func
+from sqlalchemy import DateTime, Enum, Float, JSON, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +19,11 @@ class LlmModel(Base):
     quantization: Mapped[str] = mapped_column(String(10), nullable=False, default="Q4")
     gpu_type: Mapped[str] = mapped_column(String(50), nullable=False)
     gpu_count: Mapped[int] = mapped_column(nullable=False, default=1)
+    provider_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    provider_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    deployment_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     runpod_endpoint_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[str] = mapped_column(
         Enum("pending", "deploying", "active", "inactive", name="model_status"),
         nullable=False,

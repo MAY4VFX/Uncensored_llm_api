@@ -2,40 +2,26 @@
 
 import { useEffect, useState } from "react";
 import ModelCard from "@/components/ModelCard";
-import { listAllModels, deployModel, setModelStatus, addModelFromHf, getMe } from "@/lib/api";
+import {
+  addModelFromHf,
+  AdminModel,
+  backfillRunpodOverrides,
+  deployModel,
+  getMe,
+  getProviderSettings,
+  listAllModels,
+  listProviders,
+  ProviderOption,
+  ProviderSettings,
+  setModelStatus,
+  updateModel,
+} from "@/lib/api";
 import { getToken } from "@/lib/auth";
-
-interface Model {
-  id: string;
-  slug: string;
-  display_name: string;
-  hf_repo: string;
-  params_b: number;
-  quantization: string;
-  gpu_type: string;
-  gpu_count: number;
-  status: string;
-  cost_per_1m_input: number;
-  cost_per_1m_output: number;
-  description: string | null;
-  hf_downloads: number | null;
-  hf_likes: number | null;
-  created_at: string | null;
-}
 
 const ALL_STATUSES = ["all", "active", "pending", "deploying", "inactive"] as const;
 const SIZE_BUCKETS = ["all", "lt10", "10to30", "30to70", "70plus"] as const;
 const QUANT_FILTERS = ["FP16", "Q8", "Q4", "GGUF"] as const;
-const TAG_FILTERS = [
-  "Uncensored",
-  "Qwen",
-  "Gemma",
-  "Reasoning",
-  "Abliterated",
-  "MoE",
-  "Heretic",
-  "GPT-OSS",
-] as const;
+const TAG_FILTERS = ["Uncensored", "Qwen", "Gemma", "Reasoning", "Abliterated", "MoE", "Heretic", "GPT-OSS"] as const;
 const SORT_OPTIONS = ["newest", "downloads", "likes"] as const;
 
 type SizeBucket = (typeof SIZE_BUCKETS)[number];
@@ -65,11 +51,11 @@ const sortLabels: Record<SortOption, string> = {
   likes: "Most likes",
 };
 
-function normalizeModelText(model: Model): string {
-  return [model.slug, model.hf_repo, model.display_name, model.description || ""].join(" ").toLowerCase();
+function normalizeModelText(model: AdminModel): string {
+  return [model.slug, model.hf_repo, model.display_name, model.description || "", model.effective_provider || ""].join(" ").toLowerCase();
 }
 
-function getDerivedTags(model: Model): Set<TagFilter> {
+function getDerivedTags(model: AdminModel): Set<TagFilter> {
   const text = normalizeModelText(model);
   const tags = new Set<TagFilter>();
 
@@ -92,7 +78,7 @@ function getSizeBucket(paramsB: number): SizeBucket {
   return "70plus";
 }
 
-function matchesQuantFilter(model: Model, selectedQuant: QuantFilter | null): boolean {
+function matchesQuantFilter(model: AdminModel, selectedQuant: QuantFilter | null): boolean {
   if (!selectedQuant) return true;
 
   const text = normalizeModelText(model);
@@ -105,9 +91,8 @@ function matchesQuantFilter(model: Model, selectedQuant: QuantFilter | null): bo
   return quant === selectedQuant;
 }
 
-function matchesTagFilter(model: Model, selectedTags: TagFilter[]): boolean {
+function matchesTagFilter(model: AdminModel, selectedTags: TagFilter[]): boolean {
   if (selectedTags.length === 0) return true;
-
   const derivedTags = getDerivedTags(model);
   return selectedTags.every((tag) => derivedTags.has(tag));
 }
@@ -119,7 +104,9 @@ function chipClass(isActive: boolean, activeStyle: string) {
 }
 
 export default function ModelsPage() {
-  const [models, setModels] = useState<Model[]>([]);
+  const [models, setModels] = useState<AdminModel[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [providerSettings, setProviderSettings] = useState<ProviderSettings | null>(null);
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sizeFilter, setSizeFilter] = useState<SizeBucket>("all");
@@ -133,13 +120,34 @@ export default function ModelsPage() {
   const [hfInput, setHfInput] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
+  const [savingDefaultProvider, setSavingDefaultProvider] = useState(false);
+  const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
+  const [pinningExisting, setPinningExisting] = useState(false);
+
+  const refreshAdminData = async (token: string) => {
+    const [modelsData, settingsData, providersData] = await Promise.all([
+      listAllModels(token),
+      getProviderSettings(token),
+      listProviders(token),
+    ]);
+    setModels(modelsData);
+    setProviderSettings(settingsData);
+    setProviders(providersData.providers);
+  };
 
   useEffect(() => {
     const token = getToken();
     if (token) {
-      getMe(token).then((u) => setIsAdmin(u.is_admin)).catch(() => {});
-      listAllModels(token)
-        .then(setModels)
+      getMe(token)
+        .then(async (u) => {
+          setIsAdmin(u.is_admin);
+          if (u.is_admin) {
+            await refreshAdminData(token);
+          } else {
+            const modelsData = await listAllModels(token).catch(() => [] as AdminModel[]);
+            setModels(modelsData.filter((model) => model.status === "active"));
+          }
+        })
         .catch(() => setModels([]))
         .finally(() => setLoading(false));
     } else {
@@ -151,18 +159,34 @@ export default function ModelsPage() {
               id: m.id,
               slug: m.id,
               display_name: m.id,
+              hf_repo: "",
               params_b: 0,
               quantization: "",
               gpu_type: "",
               gpu_count: 1,
               status: "active",
+              provider_status: "active",
+              provider_override: null,
+              effective_provider: "runpod",
+              provider_config: null,
+              deployment_ref: null,
+              runpod_endpoint_id: null,
               cost_per_1m_input: 0,
               cost_per_1m_output: 0,
               description: null,
-              hf_repo: "",
+              system_prompt: null,
               hf_downloads: null,
               hf_likes: null,
-              created_at: m.created ? new Date(m.created * 1000).toISOString() : null,
+              capabilities: {
+                supports_vllm: true,
+                supports_gguf: true,
+                supports_keep_warm: false,
+                supports_explicit_warm: false,
+                supports_terminate: false,
+                supports_queue_status: false,
+                supports_multigpu: false,
+              },
+              created_at: m.created ? new Date(m.created * 1000).toISOString() : new Date().toISOString(),
             })) || []
           );
         })
@@ -177,7 +201,7 @@ export default function ModelsPage() {
     setDeployingId(modelId);
     try {
       await deployModel(token, modelId);
-      setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, status: "deploying" } : m)));
+      await refreshAdminData(token);
     } catch (e: any) {
       alert(e.message || "Deploy failed");
     } finally {
@@ -191,7 +215,7 @@ export default function ModelsPage() {
     setUndeployingId(modelId);
     try {
       await setModelStatus(token, modelId, "inactive");
-      setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, status: "inactive" } : m)));
+      await refreshAdminData(token);
     } catch (e: any) {
       alert(e.message || "Undeploy failed");
     } finally {
@@ -205,7 +229,7 @@ export default function ModelsPage() {
     setAdding(true);
     setAddError("");
     try {
-      const newModel = await addModelFromHf(token, hfInput.trim());
+      const newModel = await addModelFromHf(token, hfInput.trim(), null);
       setModels((prev) => [newModel, ...prev]);
       setHfInput("");
     } catch (e: any) {
@@ -215,14 +239,56 @@ export default function ModelsPage() {
     }
   };
 
+  const handleDefaultProviderChange = async (provider: string) => {
+    const token = getToken();
+    if (!token) return;
+    setSavingDefaultProvider(true);
+    try {
+      const next = await updateProviderSettings(token, { default_provider: provider });
+      setProviderSettings(next);
+      await refreshAdminData(token);
+    } catch (e: any) {
+      alert(e.message || "Failed to update default provider");
+    } finally {
+      setSavingDefaultProvider(false);
+    }
+  };
+
+  const handleProviderOverrideChange = async (modelId: string, value: string) => {
+    const token = getToken();
+    if (!token) return;
+    setSavingOverrideId(modelId);
+    try {
+      await updateModel(token, modelId, { provider_override: value === "inherit" ? null : value });
+      await refreshAdminData(token);
+    } catch (e: any) {
+      alert(e.message || "Failed to update provider override");
+    } finally {
+      setSavingOverrideId(null);
+    }
+  };
+
+  const handleBackfillRunpod = async () => {
+    const token = getToken();
+    if (!token) return;
+    setPinningExisting(true);
+    try {
+      const result = await backfillRunpodOverrides(token);
+      alert(result.detail);
+      await refreshAdminData(token);
+    } catch (e: any) {
+      alert(e.message || "Failed to pin existing models");
+    } finally {
+      setPinningExisting(false);
+    }
+  };
+
   const toggleQuantFilter = (quant: QuantFilter) => {
     setQuantFilter((prev) => (prev === quant ? null : quant));
   };
 
   const toggleTagFilter = (tag: TagFilter) => {
-    setTagFilters((prev) =>
-      prev.includes(tag) ? prev.filter((value) => value !== tag) : [...prev, tag]
-    );
+    setTagFilters((prev) => (prev.includes(tag) ? prev.filter((value) => value !== tag) : [...prev, tag]));
   };
 
   const clearFilters = () => {
@@ -241,7 +307,8 @@ export default function ModelsPage() {
       m.display_name.toLowerCase().includes(query) ||
       m.slug.toLowerCase().includes(query) ||
       m.hf_repo.toLowerCase().includes(query) ||
-      (m.description || "").toLowerCase().includes(query);
+      (m.description || "").toLowerCase().includes(query) ||
+      (m.effective_provider || "").toLowerCase().includes(query);
 
     const matchesStatus = statusFilter === "all" || m.status === statusFilter;
     const matchesSize = sizeFilter === "all" || getSizeBucket(m.params_b) === sizeFilter;
@@ -286,6 +353,53 @@ export default function ModelsPage() {
           Browse available uncensored and abliterated LLM models
         </p>
       </div>
+
+      {isAdmin && providerSettings && (
+        <div className="mb-8 border border-surface-400 bg-surface-100 p-4 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+            <div className="flex-1 min-w-[220px]">
+              <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Global default provider</label>
+              <select
+                value={providerSettings.default_provider}
+                onChange={(e) => handleDefaultProviderChange(e.target.value)}
+                disabled={savingDefaultProvider}
+                className="input-field w-full"
+              >
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 text-xs font-mono text-surface-800 leading-relaxed">
+              New models without override inherit <span className="text-neutral-100">{providerSettings.default_provider}</span>.
+              Existing models should stay pinned to <span className="text-neutral-100">runpod</span> during migration.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {providers.map((provider) => (
+              <span key={provider.id} className="text-[10px] font-mono uppercase tracking-widest px-2 py-1 border border-surface-400 text-surface-700 bg-surface-50">
+                {provider.id} • {provider.capabilities.supports_keep_warm ? "keep-warm" : "no keep-warm"} • {provider.capabilities.supports_gguf ? "gguf" : "no gguf"}
+              </span>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 border-t border-surface-300 pt-3">
+            <button
+              onClick={handleBackfillRunpod}
+              disabled={pinningExisting}
+              className="text-[10px] font-mono uppercase tracking-wider px-3 py-1.5 border text-terminal-400 border-terminal-800 bg-terminal-950/40 hover:bg-terminal-900/60 transition-colors disabled:opacity-40"
+            >
+              {pinningExisting ? "Pinning..." : "Pin existing models to RunPod"}
+            </button>
+            <span className="text-xs font-mono text-surface-800">
+              Use once after migration to preserve the current RunPod baseline while default provider is Modal.
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4 mb-8">
         <div className="flex flex-col sm:flex-row gap-4">
@@ -366,11 +480,7 @@ export default function ModelsPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-surface-300 pt-3">
             <div className="flex items-center gap-2">
               <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900">Sort by</label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
-                className="input-field w-auto min-w-[180px]"
-              >
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} className="input-field w-auto min-w-[180px]">
                 <option value="newest">Newest added</option>
                 <option value="downloads">Most downloads</option>
                 <option value="likes">Most likes</option>
@@ -396,9 +506,7 @@ export default function ModelsPage() {
 
       {isAdmin && (
         <div className="mb-8 border border-surface-400 bg-surface-100 p-4">
-          <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">
-            Add model from HuggingFace
-          </label>
+          <label className="text-xs font-mono uppercase tracking-[0.2em] text-surface-900 mb-2 block">Add model from HuggingFace</label>
           <div className="flex gap-2">
             <input
               type="text"
@@ -416,6 +524,9 @@ export default function ModelsPage() {
               {adding ? "Adding..." : "Add Model"}
             </button>
           </div>
+          <p className="text-[10px] font-mono text-surface-700 mt-2">
+            New entries inherit the global default provider unless you set a per-model override afterwards.
+          </p>
           {addError && <p className="text-red-400 text-xs font-mono mt-2">{addError}</p>}
         </div>
       )}
@@ -427,31 +538,91 @@ export default function ModelsPage() {
           <p className="text-surface-800 font-mono text-sm">No models found. Check back soon.</p>
         </div>
       ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {sortedModels.map((m) => (
-            <ModelCard
-              key={m.id}
-              id={m.id}
-              slug={m.slug}
-              displayName={m.display_name}
-              paramsB={m.params_b}
-              quantization={m.quantization}
-              gpuType={m.gpu_type}
-              gpuCount={m.gpu_count}
-              status={m.status}
-              costInput={m.cost_per_1m_input}
-              costOutput={m.cost_per_1m_output}
-              description={m.description}
-              hfRepo={m.hf_repo}
-              hfDownloads={m.hf_downloads}
-              hfLikes={m.hf_likes}
-              isAdmin={isAdmin}
-              onDeploy={handleDeploy}
-              onUndeploy={handleUndeploy}
-              deploying={deployingId === m.id}
-              undeploying={undeployingId === m.id}
-            />
-          ))}
+        <div className="space-y-6">
+          {isAdmin && (
+            <div className="border border-surface-300 bg-surface-100/60 p-4">
+              <div className="grid md:grid-cols-[1.4fr_0.9fr_0.9fr_1fr] gap-3 text-[10px] font-mono uppercase tracking-widest text-surface-700">
+                <span>Model</span>
+                <span>Effective provider</span>
+                <span>Override</span>
+                <span>Admin control</span>
+              </div>
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {sortedModels.map((m) => (
+              <div key={m.id} className="space-y-3">
+                {isAdmin && providerSettings && (
+                  <div className="border border-surface-300 bg-surface-100/60 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest">
+                      <span className="text-surface-800">effective provider</span>
+                      <span className="text-neutral-100">{m.effective_provider}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-widest">
+                      <span className="text-surface-800">default</span>
+                      <span className="text-surface-700">{providerSettings.default_provider}</span>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono uppercase tracking-widest text-surface-800 mb-1 block">Per-model override</label>
+                      <select
+                        value={m.provider_override ?? "inherit"}
+                        onChange={(e) => handleProviderOverrideChange(m.id, e.target.value)}
+                        disabled={savingOverrideId === m.id}
+                        className="input-field w-full text-xs"
+                      >
+                        <option value="inherit">inherit default ({providerSettings.default_provider})</option>
+                        {providers.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="text-[10px] font-mono text-surface-700 leading-relaxed">
+                      {m.provider_override
+                        ? `Pinned to ${m.provider_override}.`
+                        : `No override — inherits ${providerSettings.default_provider}.`}
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-[10px] font-mono uppercase tracking-widest text-surface-700">
+                      <span className="px-2 py-1 border border-surface-400">{m.capabilities.supports_keep_warm ? "keep-warm" : "no keep-warm"}</span>
+                      <span className="px-2 py-1 border border-surface-400">{m.capabilities.supports_terminate ? "terminate" : "no terminate"}</span>
+                      <span className="px-2 py-1 border border-surface-400">{m.capabilities.supports_gguf ? "gguf" : "no gguf"}</span>
+                    </div>
+                  </div>
+                )}
+
+                <ModelCard
+                  id={m.id}
+                  slug={m.slug}
+                  displayName={m.display_name}
+                  paramsB={m.params_b}
+                  quantization={m.quantization}
+                  gpuType={m.gpu_type}
+                  gpuCount={m.gpu_count}
+                  status={m.status}
+                  providerStatus={m.provider_status}
+                  effectiveProvider={m.effective_provider}
+                  providerOverride={m.provider_override}
+                  deploymentRef={m.deployment_ref}
+                  runpodEndpointId={m.runpod_endpoint_id}
+                  supportsKeepWarm={m.capabilities.supports_keep_warm}
+                  supportsTerminate={m.capabilities.supports_terminate}
+                  costInput={m.cost_per_1m_input}
+                  costOutput={m.cost_per_1m_output}
+                  description={m.description}
+                  hfRepo={m.hf_repo}
+                  hfDownloads={m.hf_downloads}
+                  hfLikes={m.hf_likes}
+                  isAdmin={isAdmin}
+                  onDeploy={handleDeploy}
+                  onUndeploy={handleUndeploy}
+                  deploying={deployingId === m.id}
+                  undeploying={undeployingId === m.id}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
