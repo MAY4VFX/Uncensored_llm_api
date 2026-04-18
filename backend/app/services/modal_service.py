@@ -260,7 +260,7 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
-    tool_calls: list[dict] = []
+    tool_calls_acc: dict[int, dict] = {}
     finish_reason = "stop"
     response_id = ""
     created = 0
@@ -296,16 +296,27 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
                                 content_parts.append(delta["content"])
                             if delta.get("reasoning"):
                                 reasoning_parts.append(delta["reasoning"])
-                            if delta.get("tool_calls"):
-                                tool_calls.extend(delta["tool_calls"])
+                            for tc in delta.get("tool_calls") or []:
+                                idx = tc.get("index", 0)
+                                slot = tool_calls_acc.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                                if tc.get("id"):
+                                    slot["id"] = tc["id"]
+                                if tc.get("type"):
+                                    slot["type"] = tc["type"]
+                                fn = tc.get("function") or {}
+                                if fn.get("name"):
+                                    slot["function"]["name"] += fn["name"]
+                                if fn.get("arguments") is not None:
+                                    slot["function"]["arguments"] += fn["arguments"]
                             if ch.get("finish_reason"):
                                 finish_reason = ch["finish_reason"]
 
     message = {"role": "assistant", "content": "".join(content_parts) or None}
     if reasoning_parts:
         message["reasoning"] = "".join(reasoning_parts)
-    if tool_calls:
-        message["tool_calls"] = tool_calls
+    if tool_calls_acc:
+        message["tool_calls"] = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+        message["content"] = None
     return {
         "id": response_id or "chatcmpl-modal",
         "object": "chat.completion",
