@@ -44,5 +44,14 @@ class Settings(BaseSettings):
     def modal_enabled(self) -> bool:
         return bool(self.modal_token_id and self.modal_token_secret)
 
+    @property
+    def modal_secrets_env(self) -> dict[str, str]:
+        if not self.modal_enabled:
+            return {}
+        return {
+            "MODAL_TOKEN_ID": self.modal_token_id,
+            "MODAL_TOKEN_SECRET": self.modal_token_secret,
+        }
+
 
 settings = Settings()
