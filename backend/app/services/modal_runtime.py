@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+
+import modal
+
+
+def _get_env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default)
+
+
+def _build_image() -> modal.Image:
+    runtime_image = _get_env("MODAL_RUNTIME_IMAGE")
+    if runtime_image:
+        return modal.Image.from_registry(runtime_image, add_python="3.12")
+    return (
+        modal.Image.debian_slim(python_version="3.12")
+        .apt_install("git", "curl")
+        .pip_install(
+            "vllm==0.11.2",
+            "fastapi==0.115.6",
+            "uvicorn[standard]==0.34.0",
+        )
+    )
+
+
+APP_NAME = _get_env("MODAL_APP_NAME") or "unchained-modal-app"
+FUNCTION_NAME = _get_env("MODAL_FUNCTION_NAME") or "openai_api"
+MODEL_NAME = _get_env("MODAL_MODEL_NAME")
+MAX_MODEL_LEN = _get_env("MODAL_MAX_MODEL_LEN", "4096")
+GPU = _get_env("MODAL_GPU", "H100")
+TIMEOUT = int(_get_env("MODAL_TIMEOUT_SECONDS", "3600"))
+STARTUP_TIMEOUT = int(_get_env("MODAL_STARTUP_TIMEOUT_SECONDS", "1800"))
+SCALEDOWN_WINDOW = int(_get_env("MODAL_SCALEDOWN_WINDOW_SECONDS", "300"))
+MIN_CONTAINERS = int(_get_env("MODAL_MIN_CONTAINERS", "0"))
+MAX_CONTAINERS = int(_get_env("MODAL_MAX_CONTAINERS", "1"))
+BUFFER_CONTAINERS = int(_get_env("MODAL_BUFFER_CONTAINERS", "0"))
+HF_TOKEN = _get_env("HF_TOKEN")
+TOOL_PARSER = _get_env("MODAL_TOOL_PARSER")
+REASONING_PARSER = _get_env("MODAL_REASONING_PARSER")
+GENERATION_CONFIG = _get_env("MODAL_GENERATION_CONFIG_MODE", "vllm")
+DEFAULT_TEMPERATURE = _get_env("MODAL_DEFAULT_TEMPERATURE")
+GPU_MEMORY_UTILIZATION = _get_env("MODAL_GPU_MEMORY_UTILIZATION")
+ENFORCE_EAGER = _get_env("MODAL_ENFORCE_EAGER", "false").lower() == "true"
+VOLUME_NAME = _get_env("MODAL_VOLUME_NAME") or f"{APP_NAME}-weights"
+RUNTIME_ARGS = _get_env("MODAL_RUNTIME_ARGS_JSON", "{}")
+RUNTIME_ARGS_DICT = json.loads(RUNTIME_ARGS) if RUNTIME_ARGS else {}
+ENVIRONMENT_NAME = _get_env("MODAL_ENVIRONMENT", "main")
+
+image = _build_image()
+secret = modal.Secret.from_dict({"HF_TOKEN": HF_TOKEN}) if HF_TOKEN else None
+volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+app = modal.App(APP_NAME)
+
+
+def _server_command() -> list[str]:
+    command = [
+        "python",
+        "-m",
+        "vllm.entrypoints.openai.api_server",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--model",
+        MODEL_NAME,
+        "--max-model-len",
+        MAX_MODEL_LEN,
+        "--served-model-name",
+        MODEL_NAME,
+    ]
+    if TOOL_PARSER and TOOL_PARSER != "none":
+        command.extend(["--tool-call-parser", TOOL_PARSER, "--enable-auto-tool-choice"])
+    if REASONING_PARSER:
+        command.extend(["--reasoning-parser", REASONING_PARSER])
+    if GPU_MEMORY_UTILIZATION:
+        command.extend(["--gpu-memory-utilization", GPU_MEMORY_UTILIZATION])
+    if DEFAULT_TEMPERATURE:
+        command.extend(["--temperature", DEFAULT_TEMPERATURE])
+    if ENFORCE_EAGER:
+        command.append("--enforce-eager")
+    if GENERATION_CONFIG:
+        command.extend(["--generation-config", GENERATION_CONFIG])
+    for key, value in RUNTIME_ARGS_DICT.items():
+        flag = f"--{key.replace('_', '-')}"
+        if isinstance(value, bool):
+            if value:
+                command.append(flag)
+        else:
+            command.extend([flag, str(value)])
+    return command
+
+
+@app.function(
+    image=image,
+    gpu=GPU,
+    timeout=TIMEOUT,
+    startup_timeout=STARTUP_TIMEOUT,
+    scaledown_window=SCALEDOWN_WINDOW,
+    min_containers=MIN_CONTAINERS,
+    max_containers=MAX_CONTAINERS,
+    buffer_containers=BUFFER_CONTAINERS,
+    volumes={"/cache": volume},
+    secrets=[secret] if secret else [],
+)
+@modal.web_server(8000, startup_timeout=STARTUP_TIMEOUT)
+def openai_api():
+    env = os.environ.copy()
+    env["HF_HOME"] = "/cache/huggingface"
+    env["TRANSFORMERS_CACHE"] = "/cache/huggingface"
+    command = _server_command()
+    subprocess.Popen(command, env=env)
+    time.sleep(1)
+
+
+def deploy() -> dict[str, object]:
+    deployed_app = app.deploy(name=APP_NAME, environment_name=ENVIRONMENT_NAME)
+    function = modal.Function.from_name(APP_NAME, FUNCTION_NAME, environment_name=ENVIRONMENT_NAME)
+    web_url = function.get_web_url()
+    return {
+        "app_name": APP_NAME,
+        "app_id": getattr(deployed_app, "app_id", None),
+        "function_name": FUNCTION_NAME,
+        "web_url": web_url,
+        "environment": ENVIRONMENT_NAME,
+        "volume_name": VOLUME_NAME,
+        "gpu": GPU,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=["deploy"])
+    args = parser.parse_args()
+    if args.command == "deploy":
+        print(json.dumps(deploy()))
+        return
+    raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -16,6 +16,7 @@ from app.models.llm_model import LlmModel
 from app.models.user import User
 from app.schemas.openai import ChatCompletionRequest
 from app.services import proxy_service, runpod_service
+from app.services import modal_service
 from app.services.credits_service import check_credits, deduct_credits
 from app.services.provider_service import MODAL, RUNPOD, get_provider_capabilities, resolve_model_provider
 from app.services.usage_service import calculate_gpu_cost, count_message_tokens, estimate_max_cost, log_usage
@@ -64,14 +65,15 @@ async def model_status(
             "message": None,
         }
 
+    modal_status = await modal_service.get_status(model)
     return {
         "provider": provider,
-        "status": model.provider_status or "provisioning",
-        "estimated_wait_seconds": 0,
-        "workers_ready": 0,
-        "throttled": 0,
+        "status": modal_status["status"],
+        "estimated_wait_seconds": modal_status.get("estimated_wait_seconds", 0),
+        "workers_ready": modal_status.get("workers_ready", 0),
+        "throttled": modal_status.get("throttled", 0),
         "capabilities": capabilities,
-        "message": "Modal provider status mapping is scaffolded in v1; queue/warm semantics are not mirrored from RunPod.",
+        "message": modal_status.get("message"),
     }
 
 
@@ -209,7 +211,29 @@ async def chat_completions(
         raise HTTPException(status_code=402, detail="Insufficient credits")
 
     if provider == MODAL:
-        raise HTTPException(status_code=501, detail="Modal inference routing is not enabled yet; keep canary models pinned to RunPod.")
+        if request.stream:
+            return StreamingResponse(
+                _stream_modal_and_track(request, model, user, api_key, db),
+                media_type="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+        t_start = time.monotonic()
+        modal_payload = await modal_service.run_chat(request, model)
+        gpu_seconds = time.monotonic() - t_start
+        response = proxy_service.ChatCompletionResponse.model_validate(modal_payload)
+        actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
+        await deduct_credits(db, user.id, actual_cost)
+        await log_usage(
+            db,
+            user.id,
+            api_key.id,
+            model.id,
+            response.usage.prompt_tokens,
+            response.usage.completion_tokens,
+            actual_cost,
+            gpu_seconds,
+        )
+        return response
 
     if request.stream:
         return StreamingResponse(
@@ -236,6 +260,41 @@ async def chat_completions(
     )
 
     return response
+
+
+async def _stream_modal_and_track(
+    request: ChatCompletionRequest,
+    model: LlmModel,
+    user: User,
+    api_key: ApiKey,
+    db: AsyncSession,
+):
+    gpu_hourly = float(model.gpu_hourly_cost or 0)
+    margin = float(model.margin_multiplier or 1.5)
+    full_output = []
+    gpu_start = None
+
+    async for chunk in modal_service.stream_chat(request, model):
+        if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+            try:
+                import json as _json
+                data = _json.loads(chunk[6:])
+                content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                if content:
+                    if gpu_start is None:
+                        gpu_start = time.monotonic()
+                    full_output.append(content)
+            except (ValueError, IndexError, KeyError):
+                pass
+        yield chunk
+
+    gpu_end = time.monotonic()
+    gpu_seconds = (gpu_end - gpu_start) if gpu_start else 0.0
+    tokens_in = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
+    tokens_out = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}]) if full_output else 0
+    actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
+    await deduct_credits(db, user.id, actual_cost)
+    await log_usage(db, user.id, api_key.id, model.id, tokens_in, tokens_out, actual_cost, gpu_seconds)
 
 
 async def _stream_and_track(
