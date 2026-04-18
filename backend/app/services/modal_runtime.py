@@ -53,8 +53,13 @@ RUNTIME_ARGS = _get_env("MODAL_RUNTIME_ARGS_JSON", "{}")
 RUNTIME_ARGS_DICT = json.loads(RUNTIME_ARGS) if RUNTIME_ARGS else {}
 ENVIRONMENT_NAME = _get_env("MODAL_ENVIRONMENT", "main")
 
-image = _build_image()
-secret = modal.Secret.from_dict({"HF_TOKEN": HF_TOKEN}) if HF_TOKEN else None
+_RUNTIME_ENV = {
+    k: os.environ[k]
+    for k in os.environ
+    if k.startswith("MODAL_") or k == "HF_TOKEN"
+}
+image = _build_image().env(_RUNTIME_ENV)
+secret = modal.Secret.from_dict(_RUNTIME_ENV) if _RUNTIME_ENV else None
 volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 app = modal.App(APP_NAME)
 
@@ -114,9 +119,52 @@ def openai_api():
     env = os.environ.copy()
     env["HF_HOME"] = "/cache/huggingface"
     env["TRANSFORMERS_CACHE"] = "/cache/huggingface"
-    command = _server_command()
+    model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
+    if not model_name:
+        raise RuntimeError("MODAL_MODEL_NAME is not set in container env")
+    command = _server_command_with(env)
     subprocess.Popen(command, env=env)
     time.sleep(1)
+
+
+def _server_command_with(env: dict) -> list[str]:
+    model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
+    max_model_len = env.get("MODAL_MAX_MODEL_LEN") or MAX_MODEL_LEN
+    tool_parser = env.get("MODAL_TOOL_PARSER") or TOOL_PARSER
+    reasoning_parser = env.get("MODAL_REASONING_PARSER") or REASONING_PARSER
+    gpu_mem_util = env.get("MODAL_GPU_MEMORY_UTILIZATION") or GPU_MEMORY_UTILIZATION
+    default_temp = env.get("MODAL_DEFAULT_TEMPERATURE") or DEFAULT_TEMPERATURE
+    enforce_eager = (env.get("MODAL_ENFORCE_EAGER", "false").lower() == "true") or ENFORCE_EAGER
+    generation_config = env.get("MODAL_GENERATION_CONFIG_MODE") or GENERATION_CONFIG
+    runtime_args = json.loads(env.get("MODAL_RUNTIME_ARGS_JSON") or "{}") or RUNTIME_ARGS_DICT
+
+    command = [
+        "python", "-m", "vllm.entrypoints.openai.api_server",
+        "--host", "0.0.0.0", "--port", "8000",
+        "--model", model_name,
+        "--max-model-len", str(max_model_len),
+        "--served-model-name", model_name,
+    ]
+    if tool_parser and tool_parser != "none":
+        command.extend(["--tool-call-parser", tool_parser, "--enable-auto-tool-choice"])
+    if reasoning_parser:
+        command.extend(["--reasoning-parser", reasoning_parser])
+    if gpu_mem_util:
+        command.extend(["--gpu-memory-utilization", str(gpu_mem_util)])
+    if default_temp:
+        command.extend(["--temperature", str(default_temp)])
+    if enforce_eager:
+        command.append("--enforce-eager")
+    if generation_config:
+        command.extend(["--generation-config", generation_config])
+    for key, value in runtime_args.items():
+        flag = f"--{key.replace('_', '-')}"
+        if isinstance(value, bool):
+            if value:
+                command.append(flag)
+        else:
+            command.extend([flag, str(value)])
+    return command
 
 
 def deploy() -> dict[str, object]:
