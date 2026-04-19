@@ -1,18 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
-import shlex
 import subprocess
-import sys
 import time
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any
 
+import httpx
 import modal
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 
 def _get_env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
+
+
+LOCAL_VLLM_PORT = int(_get_env("MODAL_LOCAL_VLLM_PORT", "8000"))
 
 
 def _build_image() -> modal.Image:
@@ -63,82 +71,19 @@ volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 app = modal.App(APP_NAME)
 
 
-def _server_command() -> list[str]:
-    command = [
-        "python",
-        "-m",
-        "vllm.entrypoints.openai.api_server",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8000",
-        "--model",
-        MODEL_NAME,
-        "--max-model-len",
-        MAX_MODEL_LEN,
-        "--served-model-name",
-        MODEL_NAME,
-    ]
-    if TOOL_PARSER and TOOL_PARSER != "none":
-        command.extend(["--tool-call-parser", TOOL_PARSER, "--enable-auto-tool-choice"])
-    if REASONING_PARSER:
-        command.extend(["--reasoning-parser", REASONING_PARSER])
-    if GPU_MEMORY_UTILIZATION:
-        command.extend(["--gpu-memory-utilization", GPU_MEMORY_UTILIZATION])
-    if ENFORCE_EAGER:
-        command.append("--enforce-eager")
-    if GENERATION_CONFIG:
-        command.extend(["--generation-config", GENERATION_CONFIG])
-    for key, value in RUNTIME_ARGS_DICT.items():
-        flag = f"--{key.replace('_', '-')}"
-        if isinstance(value, bool):
-            if value:
-                command.append(flag)
-        else:
-            command.extend([flag, str(value)])
-    return command
-
-
-@app.function(
-    image=image,
-    gpu=GPU_SPEC,
-    timeout=TIMEOUT,
-    startup_timeout=STARTUP_TIMEOUT,
-    scaledown_window=SCALEDOWN_WINDOW,
-    min_containers=MIN_CONTAINERS,
-    max_containers=MAX_CONTAINERS,
-    buffer_containers=BUFFER_CONTAINERS,
-    volumes={"/cache": volume},
-    secrets=[secret] if secret else [],
-)
-@modal.concurrent(max_inputs=100)
-@modal.web_server(8000, startup_timeout=STARTUP_TIMEOUT)
-def openai_api():
-    env = os.environ.copy()
-    env["HF_HOME"] = "/cache/huggingface"
-    env["TRANSFORMERS_CACHE"] = "/cache/huggingface"
-    model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
-    if not model_name:
-        raise RuntimeError("MODAL_MODEL_NAME is not set in container env")
-    command = _server_command_with(env)
-    subprocess.Popen(command, env=env)
-    time.sleep(1)
-
-
-def _server_command_with(env: dict) -> list[str]:
+def _server_command_with(env: dict[str, str]) -> list[str]:
     model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
     max_model_len = env.get("MODAL_MAX_MODEL_LEN") or MAX_MODEL_LEN
     tool_parser = env.get("MODAL_TOOL_PARSER") or TOOL_PARSER
     reasoning_parser = env.get("MODAL_REASONING_PARSER") or REASONING_PARSER
     gpu_mem_util = env.get("MODAL_GPU_MEMORY_UTILIZATION") or GPU_MEMORY_UTILIZATION
-    default_temp = env.get("MODAL_DEFAULT_TEMPERATURE") or DEFAULT_TEMPERATURE
     enforce_eager = (env.get("MODAL_ENFORCE_EAGER", "false").lower() == "true") or ENFORCE_EAGER
     generation_config = env.get("MODAL_GENERATION_CONFIG_MODE") or GENERATION_CONFIG
     runtime_args = json.loads(env.get("MODAL_RUNTIME_ARGS_JSON") or "{}") or RUNTIME_ARGS_DICT
 
     command = [
         "python", "-m", "vllm.entrypoints.openai.api_server",
-        "--host", "0.0.0.0", "--port", "8000",
+        "--host", "127.0.0.1", "--port", str(LOCAL_VLLM_PORT),
         "--model", model_name,
         "--max-model-len", str(max_model_len),
         "--served-model-name", model_name,
@@ -161,6 +106,426 @@ def _server_command_with(env: dict) -> list[str]:
         else:
             command.extend([flag, str(value)])
     return command
+
+
+def _normalize_tool_call_arguments(arguments):
+    if not isinstance(arguments, str):
+        return arguments
+    s = arguments.strip()
+    if not s.startswith('"') or not s.endswith('"'):
+        return arguments
+    try:
+        inner = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return arguments
+    if not isinstance(inner, str):
+        return arguments
+    inner_stripped = inner.strip()
+    if not inner_stripped.startswith(("{", "[")):
+        return arguments
+    try:
+        json.loads(inner)
+    except (json.JSONDecodeError, ValueError):
+        return arguments
+    return inner
+
+
+def _chunk_payload(
+    completion_id: str,
+    created: int,
+    model_name: str,
+    *,
+    index: int,
+    role: str | None = None,
+    content: str | None = None,
+    tool_calls: list[dict] | None = None,
+    finish_reason: str | None = None,
+) -> str:
+    payload = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model_name,
+        "choices": [{
+            "index": index,
+            "delta": {},
+            "finish_reason": finish_reason,
+        }],
+    }
+    delta = payload["choices"][0]["delta"]
+    if role is not None:
+        delta["role"] = role
+    if content is not None:
+        delta["content"] = content
+    if tool_calls:
+        delta["tool_calls"] = tool_calls
+    return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+
+
+class _OpenAIStreamNormalizer:
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        self.created = int(time.time())
+        self.finish_emitted = False
+        self.tool_buffers: dict[int, dict[int, dict[str, Any]]] = {}
+
+    def start(self) -> str:
+        return _chunk_payload(
+            self.completion_id,
+            self.created,
+            self.model_name,
+            index=0,
+            role="assistant",
+        )
+
+    def _flush_tool_calls(self, choice_index: int) -> str | None:
+        if choice_index not in self.tool_buffers or not self.tool_buffers[choice_index]:
+            return None
+        out = []
+        for tool_index in sorted(self.tool_buffers[choice_index].keys()):
+            buf = self.tool_buffers[choice_index][tool_index]
+            out.append({
+                "index": tool_index,
+                "id": buf.get("id") or None,
+                "type": buf.get("type", "function"),
+                "function": {
+                    "name": buf.get("name") or "",
+                    "arguments": _normalize_tool_call_arguments(buf.get("args", "")),
+                },
+            })
+        return _chunk_payload(
+            self.completion_id,
+            self.created,
+            self.model_name,
+            index=choice_index,
+            tool_calls=out,
+        )
+
+    def feed(self, upstream_chunk: dict[str, Any]) -> list[str]:
+        emitted: list[str] = []
+        for choice in upstream_chunk.get("choices") or []:
+            choice_index = choice.get("index", 0)
+            delta = choice.get("delta") or {}
+            finish_reason = choice.get("finish_reason")
+            tool_calls = delta.get("tool_calls") or []
+            content = delta.get("content")
+            role = delta.get("role")
+
+            if tool_calls:
+                self.tool_buffers.setdefault(choice_index, {})
+                for tool_call in tool_calls:
+                    tool_index = tool_call.get("index", 0)
+                    buf = self.tool_buffers[choice_index].setdefault(
+                        tool_index,
+                        {"name": "", "id": "", "type": "function", "args": ""},
+                    )
+                    if tool_call.get("id"):
+                        buf["id"] = tool_call["id"]
+                    if tool_call.get("type"):
+                        buf["type"] = tool_call["type"]
+                    fn = tool_call.get("function") or {}
+                    if fn.get("name"):
+                        buf["name"] = fn["name"]
+                    new_args = fn.get("arguments")
+                    if new_args is not None:
+                        prev = buf.get("args", "")
+                        if isinstance(new_args, str) and new_args.startswith(prev):
+                            buf["args"] = new_args
+                        else:
+                            buf["args"] = prev + str(new_args)
+
+            if role is not None or content is not None:
+                emitted.append(
+                    _chunk_payload(
+                        self.completion_id,
+                        self.created,
+                        self.model_name,
+                        index=choice_index,
+                        role=role,
+                        content=content,
+                    )
+                )
+
+            if finish_reason is not None:
+                flushed = self._flush_tool_calls(choice_index)
+                if flushed is not None:
+                    emitted.append(flushed)
+                    if finish_reason == "stop":
+                        finish_reason = "tool_calls"
+                    self.tool_buffers[choice_index] = {}
+                self.finish_emitted = True
+                emitted.append(
+                    _chunk_payload(
+                        self.completion_id,
+                        self.created,
+                        self.model_name,
+                        index=choice_index,
+                        finish_reason=finish_reason,
+                    )
+                )
+        return emitted
+
+    def finalize(self) -> list[str]:
+        emitted: list[str] = []
+        if not self.finish_emitted:
+            for choice_index in list(self.tool_buffers.keys()):
+                flushed = self._flush_tool_calls(choice_index)
+                if flushed is not None:
+                    emitted.append(flushed)
+                    self.tool_buffers[choice_index] = {}
+        if not self.finish_emitted:
+            emitted.append(
+                _chunk_payload(
+                    self.completion_id,
+                    self.created,
+                    self.model_name,
+                    index=0,
+                    finish_reason="stop",
+                )
+            )
+        emitted.append("data: [DONE]\n\n")
+        return emitted
+
+
+async def _wait_until_ready(client: httpx.AsyncClient, base_url: str, proc: subprocess.Popen[Any]) -> None:
+    deadline = time.monotonic() + STARTUP_TIMEOUT
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"vLLM process exited early with code {proc.returncode}")
+        try:
+            response = await client.get(f"{base_url}/health", timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=None))
+            if response.status_code == 200:
+                return
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    raise RuntimeError(f"vLLM did not become ready within {STARTUP_TIMEOUT}s")
+
+
+async def _close_process(proc: subprocess.Popen[Any]) -> None:
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        await asyncio.to_thread(proc.wait, 10)
+        return
+    except Exception:
+        pass
+    proc.kill()
+    try:
+        await asyncio.to_thread(proc.wait, 5)
+    except Exception:
+        pass
+
+
+async def _iter_sse_payloads(response: httpx.Response):
+    buffer = ""
+    async for chunk in response.aiter_text():
+        if not chunk:
+            continue
+        buffer += chunk
+        while "\n\n" in buffer:
+            frame, buffer = buffer.split("\n\n", 1)
+            for line in frame.split("\n"):
+                if line.startswith("data: "):
+                    yield line[6:].strip()
+
+
+async def _accumulate_chat_response(response: httpx.Response, model_name: str) -> dict[str, Any]:
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_calls_acc: dict[int, dict[str, Any]] = {}
+    finish_reason = "stop"
+    response_id = "chatcmpl-modal"
+    created = 0
+    served_model = model_name
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    chunks_received = 0
+
+    async for data in _iter_sse_payloads(response):
+        if data == "[DONE]":
+            continue
+        try:
+            obj = json.loads(data)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        chunks_received += 1
+        response_id = obj.get("id") or response_id
+        created = obj.get("created") or created
+        served_model = obj.get("model") or served_model
+        if obj.get("usage"):
+            usage = obj["usage"]
+        for choice in obj.get("choices") or []:
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                content_parts.append(delta["content"])
+            if delta.get("reasoning"):
+                reasoning_parts.append(delta["reasoning"])
+            for tool_call in delta.get("tool_calls") or []:
+                index = tool_call.get("index", 0)
+                slot = tool_calls_acc.setdefault(
+                    index,
+                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+                )
+                if tool_call.get("id"):
+                    slot["id"] = tool_call["id"]
+                if tool_call.get("type"):
+                    slot["type"] = tool_call["type"]
+                fn = tool_call.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] = fn["name"]
+                if fn.get("arguments") is not None:
+                    prev = slot["function"]["arguments"]
+                    new_args = str(fn["arguments"])
+                    if new_args.startswith(prev):
+                        slot["function"]["arguments"] = new_args
+                    else:
+                        slot["function"]["arguments"] = prev + new_args
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+
+    if chunks_received == 0:
+        raise RuntimeError("vLLM returned empty stream")
+
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts) or None}
+    if reasoning_parts:
+        message["reasoning"] = "".join(reasoning_parts)
+    if tool_calls_acc:
+        tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+        for tool_call in tool_calls:
+            tool_call["function"]["arguments"] = _normalize_tool_call_arguments(tool_call["function"]["arguments"])
+        message["tool_calls"] = tool_calls
+        message["content"] = None
+        if finish_reason == "stop":
+            finish_reason = "tool_calls"
+
+    return {
+        "id": response_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": served_model,
+        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+        "usage": usage,
+    }
+
+
+def _create_web_app() -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(web_app: FastAPI):
+        env = os.environ.copy()
+        env["HF_HOME"] = "/cache/huggingface"
+        env["TRANSFORMERS_CACHE"] = "/cache/huggingface"
+        model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
+        if not model_name:
+            raise RuntimeError("MODAL_MODEL_NAME is not set in container env")
+
+        command = _server_command_with(env)
+        proc = subprocess.Popen(command, env=env)
+        base_url = f"http://127.0.0.1:{LOCAL_VLLM_PORT}"
+        client = httpx.AsyncClient()
+        try:
+            await _wait_until_ready(client, base_url, proc)
+            web_app.state.proc = proc
+            web_app.state.base_url = base_url
+            web_app.state.client = client
+            yield
+        finally:
+            await client.aclose()
+            await _close_process(proc)
+
+    web_app = FastAPI(title="Modal vLLM Proxy", lifespan=lifespan)
+
+    @web_app.get("/health")
+    async def health():
+        proc = web_app.state.proc
+        if proc.poll() is not None:
+            return JSONResponse({"status": "error", "message": "vLLM process exited"}, status_code=503)
+        try:
+            response = await web_app.state.client.get(
+                f"{web_app.state.base_url}/health",
+                timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=None),
+            )
+        except Exception as exc:
+            return JSONResponse({"status": "error", "message": str(exc)[:200]}, status_code=503)
+        if response.status_code != 200:
+            return JSONResponse({"status": "error", "message": f"upstream health {response.status_code}"}, status_code=503)
+        return {"status": "ok"}
+
+    @web_app.post("/v1/chat/completions")
+    async def chat_completions(request: Request):
+        payload = dict(await request.json())
+        model_name = str(payload.get("model") or MODEL_NAME or "model")
+        upstream_url = f"{web_app.state.base_url}/v1/chat/completions"
+        timeout = httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)
+
+        if payload.get("stream"):
+            normalizer = _OpenAIStreamNormalizer(model_name)
+
+            async def generate():
+                yield normalizer.start()
+                try:
+                    async with web_app.state.client.stream("POST", upstream_url, json=payload, timeout=timeout) as response:
+                        if response.status_code >= 400:
+                            message = await response.aread()
+                            error_text = message.decode(errors="ignore")[:200]
+                            yield f'data: {{"error":"upstream {response.status_code}: {error_text}"}}\n\n'
+                            return
+                        async for data in _iter_sse_payloads(response):
+                            if data == "[DONE]":
+                                continue
+                            try:
+                                src = json.loads(data)
+                            except (json.JSONDecodeError, ValueError):
+                                continue
+                            for out in normalizer.feed(src):
+                                yield out
+                except Exception as exc:
+                    yield f'data: {{"error":"{type(exc).__name__}: {str(exc)[:200]}"}}\n\n'
+                    return
+                for out in normalizer.finalize():
+                    yield out
+
+            return StreamingResponse(
+                generate(),
+                media_type="text/event-stream",
+                headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+            )
+
+        stream_payload = {**payload, "stream": True}
+        try:
+            async with web_app.state.client.stream("POST", upstream_url, json=stream_payload, timeout=timeout) as response:
+                response.raise_for_status()
+                result = await _accumulate_chat_response(response, model_name)
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:500] if exc.response is not None else str(exc)
+            return JSONResponse({"error": detail}, status_code=exc.response.status_code if exc.response else 502)
+        except Exception as exc:
+            return JSONResponse({"error": f"{type(exc).__name__}: {str(exc)[:500]}"}, status_code=502)
+        return JSONResponse(result)
+
+    return web_app
+
+
+WEB_APP = _create_web_app()
+
+
+@app.function(
+    image=image,
+    gpu=GPU_SPEC,
+    timeout=TIMEOUT,
+    startup_timeout=STARTUP_TIMEOUT,
+    scaledown_window=SCALEDOWN_WINDOW,
+    min_containers=MIN_CONTAINERS,
+    max_containers=MAX_CONTAINERS,
+    buffer_containers=BUFFER_CONTAINERS,
+    volumes={"/cache": volume},
+    secrets=[secret] if secret else [],
+)
+@modal.concurrent(max_inputs=100)
+@modal.asgi_app()
+def openai_api():
+    return WEB_APP
 
 
 def deploy() -> dict[str, object]:

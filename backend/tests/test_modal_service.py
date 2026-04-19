@@ -1,6 +1,3 @@
-import json
-from unittest.mock import AsyncMock
-
 import pytest
 
 from app.services import modal_service
@@ -23,7 +20,7 @@ def test_supports_runtime_rejects_gguf():
 
 def test_modal_gpu_mapping_prefers_modal_labels():
     assert modal_service._modal_gpu_value("H100_80GB") == "H100"
-    assert modal_service._modal_gpu_value("H200_141GB") == "H100"
+    assert modal_service._modal_gpu_value("H200_141GB") == "H200"
     assert modal_service._modal_gpu_value("A100_80GB") == "A100-80GB"
 
 
@@ -52,7 +49,7 @@ async def test_get_status_uses_health_probe(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_chat_posts_openai_payload(monkeypatch):
+async def test_run_chat_accumulates_sse_stream(monkeypatch):
     class Request:
         temperature = 0.2
         max_tokens = 128
@@ -66,15 +63,20 @@ async def test_run_chat_posts_openai_payload(monkeypatch):
         def raise_for_status(self):
             return None
 
-        def json(self):
-            return {
-                "id": "chatcmpl-test",
-                "object": "chat.completion",
-                "created": 1,
-                "model": "test-model",
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }
+        async def aiter_text(self):
+            for item in [
+                'data: {"id":"chatcmpl-test","created":1,"model":"test-model","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}' + "\n\n",
+                'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}' + "\n\n",
+                "data: [DONE]\n\n",
+            ]:
+                yield item
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
 
     class FakeClient:
         async def __aenter__(self):
@@ -83,16 +85,18 @@ async def test_run_chat_posts_openai_payload(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def post(self, url, json=None):
+        def stream(self, method, url, json=None):
+            assert method == "POST"
             assert url == "https://example.modal.run/v1/chat/completions"
-            assert json["stream"] is False
+            assert json["stream"] is True
             assert json["messages"][0]["content"] == "Hello"
-            return FakeResponse()
+            return FakeStream()
 
     monkeypatch.setattr(modal_service.httpx, "AsyncClient", lambda *args, **kwargs: FakeClient())
 
     result = await modal_service.run_chat(Request(), DummyModel())
     assert result["choices"][0]["message"]["content"] == "Hi"
+    assert result["usage"]["total_tokens"] == 2
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ import pytest
 
 from app.models.llm_model import LlmModel
 from app.schemas.openai import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
-from app.services import proxy_service, runpod_service
+from app.services import modal_runtime, proxy_service, runpod_service
 
 
 def test_normalize_tool_call_arguments_unwraps_double_encoded_json():
@@ -25,6 +25,12 @@ def test_normalize_tool_call_arguments_passes_partial_chunk_through():
     """Streaming may emit incremental fragments — leave them alone."""
     assert runpod_service._normalize_tool_call_arguments('{"filePath') == '{"filePath'
     assert runpod_service._normalize_tool_call_arguments('') == ''
+
+
+def test_modal_normalize_tool_call_arguments_unwraps_double_encoded_json():
+    src = '"{\\"filePath\\": \\"/tmp/x.txt\\"}"'
+    out = modal_runtime._normalize_tool_call_arguments(src)
+    assert out == '{"filePath": "/tmp/x.txt"}'
 
 
 @pytest.mark.asyncio
@@ -710,3 +716,79 @@ async def test_stream_unwraps_double_encoded_args_in_buffered_chunk(monkeypatch)
                     final_args = fn["arguments"]
     assert final_args == '{"filePath":"/x"}', f"unexpected args: {final_args!r}"
     assert json.loads(final_args) == {"filePath": "/x"}
+
+
+def test_modal_stream_normalizer_converts_accumulated_tool_args_to_single_flush():
+    normalizer = modal_runtime._OpenAIStreamNormalizer("test-model")
+    start = normalizer.start()
+    assert '"role":"assistant"' in start
+
+    full = '{"command":"echo hi","description":"say hi"}'
+    out1 = normalizer.feed({
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "Bash", "arguments": full[:14]},
+                }]
+            },
+            "finish_reason": None,
+        }]
+    })
+    assert out1 == []
+
+    out2 = normalizer.feed({
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "function": {"arguments": full},
+                }]
+            },
+            "finish_reason": "tool_calls",
+        }]
+    })
+    payloads = [json.loads(x[6:]) for x in out2 if x.startswith("data: ")]
+    tool_chunks = [p for p in payloads if p["choices"][0]["delta"].get("tool_calls")]
+    assert len(tool_chunks) == 1
+    tool_call = tool_chunks[0]["choices"][0]["delta"]["tool_calls"][0]
+    assert tool_call["function"]["arguments"] == full
+    assert json.loads(tool_call["function"]["arguments"]) == {"command": "echo hi", "description": "say hi"}
+    assert any(p["choices"][0]["finish_reason"] == "tool_calls" for p in payloads)
+
+
+def test_modal_stream_normalizer_unwraps_double_encoded_args():
+    normalizer = modal_runtime._OpenAIStreamNormalizer("test-model")
+    encoded = '"{\\"filePath\\":\\"/x\\"}"'
+    out = normalizer.feed({
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": encoded},
+                }]
+            },
+            "finish_reason": "tool_calls",
+        }]
+    })
+    payloads = [json.loads(x[6:]) for x in out if x.startswith("data: ")]
+    tool_call = payloads[0]["choices"][0]["delta"]["tool_calls"][0]
+    assert tool_call["function"]["arguments"] == '{"filePath":"/x"}'
+    assert json.loads(tool_call["function"]["arguments"]) == {"filePath": "/x"}
+
+
+def test_modal_stream_normalizer_emits_done_on_finalize():
+    normalizer = modal_runtime._OpenAIStreamNormalizer("test-model")
+    normalizer.start()
+    final = normalizer.finalize()
+    assert final[-1] == "data: [DONE]\n\n"
+    payload = json.loads(final[0][6:])
+    assert payload["object"] == "chat.completion.chunk"
+    assert payload["choices"][0]["finish_reason"] == "stop"
