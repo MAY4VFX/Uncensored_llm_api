@@ -169,6 +169,7 @@ class _OpenAIStreamNormalizer:
         self.created = int(time.time())
         self.finish_emitted = False
         self.tool_buffers: dict[int, dict[int, dict[str, Any]]] = {}
+        self.tool_calls_seen: set[int] = set()
 
     def start(self) -> str:
         return _chunk_payload(
@@ -213,6 +214,7 @@ class _OpenAIStreamNormalizer:
             role = delta.get("role")
 
             if tool_calls:
+                self.tool_calls_seen.add(choice_index)
                 self.tool_buffers.setdefault(choice_index, {})
                 for tool_call in tool_calls:
                     tool_index = tool_call.get("index", 0)
@@ -251,9 +253,9 @@ class _OpenAIStreamNormalizer:
                 flushed = self._flush_tool_calls(choice_index)
                 if flushed is not None:
                     emitted.append(flushed)
-                    if finish_reason == "stop":
-                        finish_reason = "tool_calls"
                     self.tool_buffers[choice_index] = {}
+                if choice_index in self.tool_calls_seen and finish_reason in (None, "stop"):
+                    finish_reason = "tool_calls"
                 self.finish_emitted = True
                 emitted.append(
                     _chunk_payload(

@@ -792,3 +792,24 @@ def test_modal_stream_normalizer_emits_done_on_finalize():
     payload = json.loads(final[0][6:])
     assert payload["object"] == "chat.completion.chunk"
     assert payload["choices"][0]["finish_reason"] == "stop"
+
+
+def test_modal_stream_normalizer_forces_tool_calls_finish_after_tool_chunk():
+    normalizer = modal_runtime._OpenAIStreamNormalizer("test-model")
+    out = normalizer.feed({
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": "{}"},
+                }]
+            },
+            "finish_reason": "stop",
+        }]
+    })
+    payloads = [json.loads(x[6:]) for x in out if x.startswith("data: ")]
+    assert payloads[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] == "{}"
+    assert payloads[1]["choices"][0]["finish_reason"] == "tool_calls"
