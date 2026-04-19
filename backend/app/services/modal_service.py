@@ -274,7 +274,7 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
         reasoning_parts.clear() if reasoning_parts else None
         tool_calls_acc.clear()
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None), follow_redirects=True) as client:
                 async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
                     response.raise_for_status()
                     buf = ""
@@ -372,7 +372,7 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
         for attempt in range(3):
             chunks_received = 0
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None), follow_redirects=True) as client:
                     async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
                         response.raise_for_status()
                         async for chunk in response.aiter_text():
