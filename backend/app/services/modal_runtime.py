@@ -108,6 +108,11 @@ def _server_command_with(env: dict[str, str]) -> list[str]:
     return command
 
 
+def _is_gpt_oss_model(model_name: str | None) -> bool:
+    s = (model_name or "").lower()
+    return "gpt-oss" in s or "gpt_oss" in s
+
+
 def _normalize_tool_call_arguments(arguments):
     if not isinstance(arguments, str):
         return arguments
@@ -138,6 +143,7 @@ def _chunk_payload(
     index: int,
     role: str | None = None,
     content: str | None = None,
+    reasoning: str | None = None,
     tool_calls: list[dict] | None = None,
     finish_reason: str | None = None,
 ) -> str:
@@ -157,6 +163,8 @@ def _chunk_payload(
         delta["role"] = role
     if content is not None:
         delta["content"] = content
+    if reasoning is not None:
+        delta["reasoning"] = reasoning
     if tool_calls:
         delta["tool_calls"] = tool_calls
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
@@ -334,6 +342,12 @@ async def _iter_sse_payloads(response: httpx.Response):
                     yield line[6:].strip()
 
 
+async def _nonstream_chat_response(client: httpx.AsyncClient, upstream_url: str, payload: dict[str, Any], timeout: httpx.Timeout) -> dict[str, Any]:
+    response = await client.post(upstream_url, json=payload, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
 async def _accumulate_chat_response(response: httpx.Response, model_name: str) -> dict[str, Any]:
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
@@ -460,11 +474,48 @@ def _create_web_app() -> FastAPI:
         model_name = str(payload.get("model") or MODEL_NAME or "model")
         upstream_url = f"{web_app.state.base_url}/v1/chat/completions"
         timeout = httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None)
+        use_nonstream_upstream = _is_gpt_oss_model(model_name) and bool(payload.get("tools"))
 
         if payload.get("stream"):
-            normalizer = _OpenAIStreamNormalizer(model_name)
-
             async def generate():
+                if use_nonstream_upstream:
+                    try:
+                        result = await _nonstream_chat_response(
+                            web_app.state.client,
+                            upstream_url,
+                            {**payload, "stream": False},
+                            timeout,
+                        )
+                    except httpx.HTTPStatusError as exc:
+                        detail = exc.response.text[:500] if exc.response is not None else str(exc)
+                        yield f'data: {{"error":"{detail}"}}\n\n'
+                        return
+                    except Exception as exc:
+                        yield f'data: {{"error":"{type(exc).__name__}: {str(exc)[:200]}"}}\n\n'
+                        return
+
+                    completion_id = result.get("id") or f"chatcmpl-{uuid.uuid4().hex[:12]}"
+                    created = result.get("created") or int(time.time())
+                    served_model = result.get("model") or model_name
+                    choice = (result.get("choices") or [{}])[0]
+                    message = choice.get("message") or {}
+
+                    yield _chunk_payload(completion_id, created, served_model, index=0, role="assistant")
+                    if message.get("reasoning"):
+                        yield _chunk_payload(completion_id, created, served_model, index=0, reasoning=message["reasoning"])
+                    if message.get("content") is not None:
+                        yield _chunk_payload(completion_id, created, served_model, index=0, content=message.get("content"))
+                    tool_calls = message.get("tool_calls") or []
+                    if tool_calls:
+                        yield _chunk_payload(completion_id, created, served_model, index=0, tool_calls=tool_calls)
+                    finish_reason = choice.get("finish_reason")
+                    if tool_calls and finish_reason in (None, "stop"):
+                        finish_reason = "tool_calls"
+                    yield _chunk_payload(completion_id, created, served_model, index=0, finish_reason=finish_reason or "stop")
+                    yield "data: [DONE]\n\n"
+                    return
+
+                normalizer = _OpenAIStreamNormalizer(model_name)
                 yield normalizer.start()
                 try:
                     async with web_app.state.client.stream("POST", upstream_url, json=payload, timeout=timeout) as response:
@@ -496,9 +547,17 @@ def _create_web_app() -> FastAPI:
 
         stream_payload = {**payload, "stream": True}
         try:
-            async with web_app.state.client.stream("POST", upstream_url, json=stream_payload, timeout=timeout) as response:
-                response.raise_for_status()
-                result = await _accumulate_chat_response(response, model_name)
+            if use_nonstream_upstream:
+                result = await _nonstream_chat_response(
+                    web_app.state.client,
+                    upstream_url,
+                    {**payload, "stream": False},
+                    timeout,
+                )
+            else:
+                async with web_app.state.client.stream("POST", upstream_url, json=stream_payload, timeout=timeout) as response:
+                    response.raise_for_status()
+                    result = await _accumulate_chat_response(response, model_name)
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:500] if exc.response is not None else str(exc)
             return JSONResponse({"error": detail}, status_code=exc.response.status_code if exc.response else 502)
