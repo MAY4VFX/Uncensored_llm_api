@@ -503,13 +503,15 @@ def _create_web_app() -> FastAPI:
                     yield _chunk_payload(completion_id, created, served_model, index=0, role="assistant")
                     if message.get("reasoning"):
                         yield _chunk_payload(completion_id, created, served_model, index=0, reasoning=message["reasoning"])
-                    if message.get("content") is not None:
-                        yield _chunk_payload(completion_id, created, served_model, index=0, content=message.get("content"))
                     tool_calls = message.get("tool_calls") or []
+                    content = message.get("content")
                     if tool_calls:
+                        content = None
                         yield _chunk_payload(completion_id, created, served_model, index=0, tool_calls=tool_calls)
+                    elif content is not None:
+                        yield _chunk_payload(completion_id, created, served_model, index=0, content=content)
                     finish_reason = choice.get("finish_reason")
-                    if tool_calls and finish_reason in (None, "stop"):
+                    if tool_calls:
                         finish_reason = "tool_calls"
                     yield _chunk_payload(completion_id, created, served_model, index=0, finish_reason=finish_reason or "stop")
                     yield "data: [DONE]\n\n"
