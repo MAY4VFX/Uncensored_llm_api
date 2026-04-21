@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 import subprocess
+import time
+import uuid
 from typing import Any
 
 import httpx
@@ -259,6 +261,80 @@ def _serialize_messages(request: ChatCompletionRequest) -> list[dict[str, Any]]:
     return out
 
 
+def _tool_schema_by_name(tools: list[dict] | None) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for tool in tools or []:
+        fn = tool.get("function") or {}
+        name = fn.get("name")
+        params = fn.get("parameters")
+        if isinstance(name, str) and isinstance(params, dict):
+            out[name] = params
+    return out
+
+
+def _schema_requires_empty_object(schema: dict[str, Any] | None) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    return (
+        schema.get("type") == "object"
+        and (schema.get("properties") or {}) == {}
+        and (schema.get("required") or []) == []
+        and schema.get("additionalProperties") is False
+    )
+
+
+def _is_empty_schema_websearch_helper(request: ChatCompletionRequest) -> bool:
+    tools = request.tools or []
+    if len(tools) != 1:
+        return False
+    fn = tools[0].get("function") or {}
+    if fn.get("name") != "web_search":
+        return False
+    if not _schema_requires_empty_object(fn.get("parameters")):
+        return False
+    if len(request.messages) < 2:
+        return False
+    return request.messages[-1].content.startswith("Perform a web search for the query:")
+
+
+def _synthetic_web_search_stream() -> list[str]:
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+    return [
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "web_search_helper", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})}\n\n',
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "web_search_helper", "choices": [{"index": 0, "delta": {"reasoning": "We need to perform web search. Use function.", "reasoning_content": "We need to perform web search. Use function."}, "finish_reason": None}]})}\n\n',
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "web_search_helper", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": f"call_{uuid.uuid4().hex[:8]}", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}]}, "finish_reason": None}]})}\n\n',
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "web_search_helper", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})}\n\n',
+        'data: [DONE]\n\n',
+    ]
+
+
+def _synthetic_web_search_result() -> dict[str, Any]:
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": "web_search_helper",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "reasoning": "We need to perform web search. Use function.",
+                "tool_calls": [{
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": "{}"},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str, Any]:
     # Always stream from vLLM and accumulate locally. Historically the
     # non-stream path through openai_gptoss crashed on v0.19.1 with
@@ -371,6 +447,11 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
 
 async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
     import asyncio
+    if _is_empty_schema_websearch_helper(request):
+        for chunk in _synthetic_web_search_stream():
+            yield chunk
+        return
+
     payload = {
         "model": model.hf_repo,
         "messages": _serialize_messages(request),
