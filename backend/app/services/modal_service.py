@@ -43,7 +43,14 @@ def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | No
     app_name = config.get("app_name") or f"{settings.modal_app_prefix}-{model.slug}"
     function_name = config.get("function_name") or "openai_api"
     volume_name = config.get("volume_name") or f"{app_name}-weights"
-    runtime_image = config.get("image") or default_image or ""
+    # Prefer profile's modal_docker_image (family-specific pinning), fall back to
+    # existing provider_config, then explicit default, then empty (runtime default).
+    runtime_image = (
+        profile.get("modal_docker_image")
+        or config.get("image")
+        or default_image
+        or ""
+    )
 
     env = {
         "MODAL_APP_NAME": app_name,
@@ -237,14 +244,29 @@ def _patch_gpt_oss_stops(payload: dict, model: LlmModel) -> None:
     payload["stop_token_ids"] = existing
 
 
+def _serialize_messages(request: ChatCompletionRequest) -> list[dict[str, Any]]:
+    """Preserve tool_calls / tool_call_id / name when forwarding messages."""
+    out: list[dict[str, Any]] = []
+    for m in request.messages:
+        item: dict[str, Any] = {"role": m.role, "content": m.content}
+        if getattr(m, "name", None):
+            item["name"] = m.name
+        if getattr(m, "tool_call_id", None):
+            item["tool_call_id"] = m.tool_call_id
+        if getattr(m, "tool_calls", None):
+            item["tool_calls"] = m.tool_calls
+        out.append(item)
+    return out
+
+
 async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str, Any]:
-    # vLLM 0.19.1 with openai_gptoss reasoning parser crashes in
-    # chat_completion_full_generator (HarmonyError on bad first tokens).
-    # Always stream from vLLM and accumulate locally to bypass the
-    # non-stream harmony path. Returned shape stays OpenAI-compat.
+    # Always stream from vLLM and accumulate locally. Historically the
+    # non-stream path through openai_gptoss crashed on v0.19.1 with
+    # HarmonyError; we pinned back to v0.11.2 but stream-accumulate is
+    # still the more defensive path for long cold starts.
     payload = {
         "model": model.hf_repo,
-        "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        "messages": _serialize_messages(request),
         "temperature": request.temperature,
         "max_tokens": request.max_tokens or 4096,
         "top_p": request.top_p,
@@ -351,7 +373,7 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
     import asyncio
     payload = {
         "model": model.hf_repo,
-        "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        "messages": _serialize_messages(request),
         "temperature": request.temperature,
         "max_tokens": request.max_tokens or 4096,
         "top_p": request.top_p,
