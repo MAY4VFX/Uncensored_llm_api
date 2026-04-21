@@ -297,6 +297,25 @@ def _is_empty_schema_websearch_helper(request: ChatCompletionRequest) -> bool:
     return request.messages[-1].content.startswith("Perform a web search for the query:")
 
 
+def _is_webfetch_helper(request: ChatCompletionRequest) -> bool:
+    tools = request.tools or []
+    if len(tools) != 1:
+        return False
+    fn = tools[0].get("function") or {}
+    if fn.get("name") != "WebFetch":
+        return False
+    params = fn.get("parameters") or {}
+    props = params.get("properties") or {}
+    fmt = props.get("format") or {}
+    values = fmt.get("enum") or []
+    if values != ["text", "markdown", "html"]:
+        return False
+    if len(request.messages) < 1:
+        return False
+    last = request.messages[-1].content.strip()
+    return last.startswith("https://") or last.startswith("http://")
+
+
 def _synthetic_web_search_stream() -> list[str]:
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
@@ -335,7 +354,54 @@ def _synthetic_web_search_result() -> dict[str, Any]:
     }
 
 
+def _synthetic_webfetch_stream(request: ChatCompletionRequest) -> list[str]:
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+    url = request.messages[-1].content.strip()
+    args = json.dumps({"url": url, "format": "text"})
+    return [
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "webfetch_helper", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})}\n\n',
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "webfetch_helper", "choices": [{"index": 0, "delta": {"reasoning": "We need to fetch this URL. Use function.", "reasoning_content": "We need to fetch this URL. Use function."}, "finish_reason": None}]})}\n\n',
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "webfetch_helper", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": f"call_{uuid.uuid4().hex[:8]}", "type": "function", "function": {"name": "WebFetch", "arguments": args}}]}, "finish_reason": None}]})}\n\n',
+        f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "webfetch_helper", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})}\n\n',
+        'data: [DONE]\n\n',
+    ]
+
+
+def _synthetic_webfetch_result(request: ChatCompletionRequest) -> dict[str, Any]:
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+    url = request.messages[-1].content.strip()
+    args = json.dumps({"url": url, "format": "text"})
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": "webfetch_helper",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "reasoning": "We need to fetch this URL. Use function.",
+                "tool_calls": [{
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {"name": "WebFetch", "arguments": args},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str, Any]:
+    if _is_empty_schema_websearch_helper(request):
+        return _synthetic_web_search_result()
+    if _is_webfetch_helper(request):
+        return _synthetic_webfetch_result(request)
+
     # Always stream from vLLM and accumulate locally. Historically the
     # non-stream path through openai_gptoss crashed on v0.19.1 with
     # HarmonyError; we pinned back to v0.11.2 but stream-accumulate is
@@ -449,6 +515,10 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
     import asyncio
     if _is_empty_schema_websearch_helper(request):
         for chunk in _synthetic_web_search_stream():
+            yield chunk
+        return
+    if _is_webfetch_helper(request):
+        for chunk in _synthetic_webfetch_stream(request):
             yield chunk
         return
 
