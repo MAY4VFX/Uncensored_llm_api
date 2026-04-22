@@ -33,6 +33,7 @@ async def _get_shared_client() -> httpx.AsyncClient:
         async with _shared_client_lock:
             if _shared_client is None or _shared_client.is_closed:
                 _shared_client = httpx.AsyncClient(
+                    http2=True,
                     timeout=httpx.Timeout(connect=60.0, read=None, write=30.0, pool=10.0),
                     limits=httpx.Limits(
                         max_connections=200,
