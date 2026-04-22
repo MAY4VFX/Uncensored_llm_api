@@ -438,7 +438,7 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
         reasoning_parts.clear() if reasoning_parts else None
         tool_calls_acc.clear()
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None), follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=None, write=30.0, pool=None), follow_redirects=True) as client:
                 async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
                     response.raise_for_status()
                     buf = ""
@@ -488,10 +488,14 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
                 continue
             last_exc = None
             break
-        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
             last_exc = exc
             await asyncio.sleep(2 + attempt * 3)
             continue
+        except httpx.ConnectTimeout as exc:
+            # Не ретраить: Modal LB уже принял попытку, ретрай только удваивает задержку.
+            last_exc = exc
+            break
     if last_exc is not None and not (content_parts or reasoning_parts or tool_calls_acc):
         raise ModalProviderError(f"Modal failed after retries: {type(last_exc).__name__}: {last_exc}")
 
@@ -545,7 +549,7 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
         for attempt in range(3):
             chunks_received = 0
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=None), follow_redirects=True) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=None, write=30.0, pool=None), follow_redirects=True) as client:
                     async with client.stream("POST", _modal_web_url(model) + "/v1/chat/completions", json=payload) as response:
                         response.raise_for_status()
                         async for chunk in response.aiter_text():
@@ -558,10 +562,13 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
                     continue
                 last_exc = None
                 break
-            except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
                 last_exc = exc
                 await asyncio.sleep(2 + attempt * 3)
                 continue
+            except httpx.ConnectTimeout as exc:
+                last_exc = exc
+                break
             except Exception as exc:
                 last_exc = exc
                 break
