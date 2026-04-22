@@ -537,6 +537,11 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
     if tool_calls_acc:
         message["tool_calls"] = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
         message["content"] = None
+        # vLLM gpt-oss streaming bug (vllm-project/vllm#24076): с tool_calls часто
+        # приходит finish_reason="stop". opencode/клиент тогда считает turn
+        # законченным и не делает следующую итерацию agent loop. Форсим tool_calls
+        # когда tool_calls присутствуют — как делают OpenRouter и другие gateway.
+        finish_reason = "tool_calls"
     return {
         "id": response_id or "chatcmpl-modal",
         "object": "chat.completion",
