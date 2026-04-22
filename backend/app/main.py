@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import async_session, engine
 from app.routers import admin, api_keys, auth, billing, chat, keep_warm, models, playground, usage
 from app.services.keep_warm_service import tick_billing
+from app.services.modal_service import aclose_shared_client
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(_keep_warm_ticker())
     yield
     task.cancel()
+    await aclose_shared_client()
     await engine.dispose()
 
 
