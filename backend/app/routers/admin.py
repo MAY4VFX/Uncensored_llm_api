@@ -452,7 +452,8 @@ async def _deploy_runpod_model(model: LlmModel, profile: dict, db: AsyncSession)
 
 async def _deploy_modal_model(model: LlmModel, profile: dict, db: AsyncSession) -> tuple[str | None, str | None, dict | None, str | None]:
     settings = await get_or_create_app_settings(db)
-    result = await deploy_modal_model(model, profile, default_image=settings.modal_default_image)
+    default_image = profile.get("modal_docker_image") or settings.modal_default_image
+    result = await deploy_modal_model(model, profile, default_image=default_image)
     return None, result.get("deployment_ref"), result.get("provider_config"), result.get("provider_status")
 
 

@@ -59,13 +59,10 @@ async def _sync_workers_min(db: AsyncSession, model: LlmModel) -> int:
 
     if await _supports_keep_warm(db, model):
         provider = await resolve_model_provider(model, db)
-        try:
-            if provider == RUNPOD:
-                await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, active_count)
-            elif provider == MODAL:
-                await modal_service.update_min_containers(model, active_count)
-        except Exception as e:
-            logger.error(f"Failed to set min={active_count} for {model.slug}: {e}")
+        if provider == RUNPOD:
+            await runpod_service.update_endpoint_workers_min(model.runpod_endpoint_id, active_count)
+        elif provider == MODAL:
+            await modal_service.update_min_containers(model, active_count)
 
     return active_count
 
@@ -118,9 +115,16 @@ async def enable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict:
                 last_billed_at=now,
             )
         )
-    await db.commit()
+    await db.flush()
 
-    workers = await _sync_workers_min(db, model)
+    try:
+        workers = await _sync_workers_min(db, model)
+    except Exception as exc:
+        await db.rollback()
+        logger.exception(f"enable keep_warm failed for {model.slug}: provider sync errored")
+        raise RuntimeError(f"Failed to enable on provider: {exc}") from exc
+
+    await db.commit()
     return {
         "status": "enabled",
         "price_per_hour": price,
@@ -137,9 +141,16 @@ async def disable(db: AsyncSession, user_id: uuid.UUID, model: LlmModel) -> dict
         .where(KeepWarm.user_id == user_id, KeepWarm.model_id == model.id)
         .values(is_active=False)
     )
-    await db.commit()
+    await db.flush()
 
-    workers = await _sync_workers_min(db, model)
+    try:
+        workers = await _sync_workers_min(db, model)
+    except Exception as exc:
+        await db.rollback()
+        logger.exception(f"disable keep_warm failed for {model.slug}: provider sync errored")
+        raise RuntimeError(f"Failed to disable on provider: {exc}") from exc
+
+    await db.commit()
     return {
         "status": "disabled",
         "warm_workers": workers,
@@ -192,7 +203,6 @@ async def tick_billing(db: AsyncSession) -> None:
     rows = result.all()
 
     now = datetime.now(timezone.utc)
-    models_to_check: set[uuid.UUID] = set()
 
     for kw, model in rows:
         provider = await resolve_model_provider(model, db)
@@ -215,18 +225,27 @@ async def tick_billing(db: AsyncSession) -> None:
                 .values(last_billed_at=now)
             )
             await db.commit()
-        else:
-            await db.execute(
-                update(KeepWarm)
-                .where(KeepWarm.id == kw.id)
-                .values(is_active=False)
-            )
-            await db.commit()
-            models_to_check.add(model.id)
-            logger.info(f"Keep warm disabled for user {kw.user_id} model {model.slug}: insufficient credits")
+            continue
 
-    for model_id in models_to_check:
-        model_result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))
-        model = model_result.scalar_one_or_none()
-        if model:
+        # Insufficient credits: flip is_active=false only AFTER provider sync succeeds.
+        # If provider call fails, rollback so next tick retries — otherwise record drops
+        # out of the loop and GPU keeps burning on the provider side.
+        await db.execute(
+            update(KeepWarm)
+            .where(KeepWarm.id == kw.id)
+            .values(is_active=False)
+        )
+        await db.flush()
+        try:
             await _sync_workers_min(db, model)
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                f"keep_warm depletion: provider sync failed for {model.slug} user={kw.user_id}; "
+                "keeping is_active=true for retry"
+            )
+            continue
+        await db.commit()
+        logger.info(
+            f"Keep warm disabled for user {kw.user_id} model {model.slug}: insufficient credits"
+        )

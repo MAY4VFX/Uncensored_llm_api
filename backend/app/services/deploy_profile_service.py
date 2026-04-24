@@ -32,10 +32,10 @@ FAMILY_LIMITS = {
         # recipe (https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html)
         "reasoning_parser": "openai_gptoss",
         "default_temperature": 0.2,
-        # vllm/vllm-openai image has no RunPod queue handler → jobs hang in
-        # queue forever. runpod/worker-v1-vllm polls the queue correctly and
-        # forwards to vLLM; use it for gpt-oss as well.
-        # "docker_image": "" → create_endpoint resolves latest worker-v1-vllm
+        # Modal path uses vllm/vllm-openai:v0.11.2 directly (no RunPod queue
+        # handler needed). v0.19.1 has harmony stream regressions; v0.11.2 is
+        # the known-good image for gpt-oss tool-calling. RunPod path ignores
+        # this and resolves latest worker-v1-vllm via create_endpoint.
         # CUDA graph capture for gpt-oss 120b overruns RunPod's init timeout
         # even when shards loaded fine. Eager inference eliminates 5-10 min of
         # warmup and lets the worker reach ready reliably.
@@ -219,6 +219,10 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
     docker_image = limits.get("docker_image", "")
     if not docker_image and family == "gguf":
         docker_image = "may4vfx/worker-llamacpp:latest"
+    # For Modal path, force the known-good gpt-oss image. RunPod path
+    # overrides this back to "" inside admin.py so it can resolve the
+    # proper worker-v1-vllm image instead.
+    modal_docker_image = docker_image or ("vllm/vllm-openai:v0.11.2" if family == "gpt_oss" else "")
 
     runtime_args = dict(limits.get("runtime_args", {}))
 
@@ -239,6 +243,7 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
         "tool_parser": limits["tool_parser"],
         "reasoning_parser": limits.get("reasoning_parser"),
         "docker_image": docker_image,
+        "modal_docker_image": modal_docker_image,
         "default_temperature": limits["default_temperature"],
         "generation_config_mode": limits.get("generation_config_mode", "vllm"),
         "enable_prefix_caching": True,
