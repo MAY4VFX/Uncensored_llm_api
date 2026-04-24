@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import re
 import subprocess
 from typing import Any
 
@@ -11,6 +13,7 @@ import httpx
 from app.config import settings
 from app.models.llm_model import LlmModel
 from app.schemas.openai import ChatCompletionRequest
+from app.services.runpod_service import _resolve_gguf
 
 
 class ModalProviderError(RuntimeError):
@@ -18,11 +21,32 @@ class ModalProviderError(RuntimeError):
 
 
 def supports_runtime(profile: dict[str, Any]) -> bool:
-    return profile.get("family") != "gguf"
+    family = str(profile.get("family") or "").strip()
+    return bool(family)
 
 
 def _provider_config(model: LlmModel) -> dict[str, Any]:
     return dict(model.provider_config or {})
+
+
+def _sanitize_modal_part(value: str, fallback: str, max_len: int = 63) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9-]+", "-", value).strip("-").lower()
+    if not cleaned:
+        cleaned = fallback
+    if len(cleaned) <= max_len:
+        return cleaned
+    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
+    return cleaned[: max_len - 9].rstrip("-") + "-" + digest
+
+
+def _default_modal_app_name(model: LlmModel) -> str:
+    prefix = _sanitize_modal_part(settings.modal_app_prefix, "unchained")
+    slug = _sanitize_modal_part(model.slug or model.hf_repo or "model", "model")
+    return _sanitize_modal_part(f"{prefix}-{slug}", "unchained-model", max_len=63)
+
+
+def _default_modal_volume_name(app_name: str) -> str:
+    return _sanitize_modal_part(f"{app_name}-weights", "modal-weights", max_len=63)
 
 
 def _modal_gpu_value(value: str | None) -> str:
@@ -38,33 +62,50 @@ def _modal_gpu_value(value: str | None) -> str:
     return mapping.get(gpu, gpu or "H100")
 
 
-def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | None = None) -> dict[str, str]:
+async def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: str | None = None) -> dict[str, str]:
     config = _provider_config(model)
-    app_name = config.get("app_name") or f"{settings.modal_app_prefix}-{model.slug}"
-    function_name = config.get("function_name") or "openai_api"
-    volume_name = config.get("volume_name") or f"{app_name}-weights"
+    family = str(profile.get("family") or "").strip()
+    app_name = _sanitize_modal_part(str(config.get("app_name") or _default_modal_app_name(model)), "unchained-model")
+    function_name = str(config.get("function_name") or "openai_api")
+    volume_name = _sanitize_modal_part(str(config.get("volume_name") or _default_modal_volume_name(app_name)), "modal-weights")
     runtime_image = config.get("image") or default_image or ""
+    runtime_args = dict(profile.get("runtime_args") or {})
+
+    if family == "gguf":
+        resolved = await _resolve_gguf(model.hf_repo)
+        runtime_args.setdefault("gguf_file", resolved["gguf_file"])
+        runtime_args.setdefault("ngl", 999)
+        runtime_args.setdefault("jinja", True)
+        runtime_image = str(config.get("image") or "ghcr.io/ggml-org/llama.cpp:server-cuda")
 
     env = {
         "MODAL_APP_NAME": app_name,
         "MODAL_FUNCTION_NAME": function_name,
         "MODAL_MODEL_NAME": model.hf_repo,
+        "MODAL_MODEL_FAMILY": family,
         "MODAL_MAX_MODEL_LEN": str(profile.get("target_context") or model.max_context_length or 4096),
         "MODAL_GPU": _modal_gpu_value(str(profile.get("gpu_type") or model.gpu_type or config.get("gpu"))),
         "MODAL_TIMEOUT_SECONDS": str(config.get("timeout_seconds") or 3600),
         "MODAL_STARTUP_TIMEOUT_SECONDS": str(config.get("startup_timeout_seconds") or profile.get("runpod_init_timeout") or 1800),
         "MODAL_SCALEDOWN_WINDOW_SECONDS": str(config.get("scaledown_window_seconds") or 600),
         "MODAL_MIN_CONTAINERS": str(config.get("min_containers") or 0),
-        "MODAL_MAX_CONTAINERS": str(config.get("max_containers") or max(1, model.gpu_count or 1)),
+        "MODAL_MAX_CONTAINERS": str(config.get("max_containers") or max(1, profile.get("gpu_count") or model.gpu_count or 1)),
         "MODAL_BUFFER_CONTAINERS": str(config.get("buffer_containers") or 0),
         "MODAL_VOLUME_NAME": volume_name,
         "MODAL_RUNTIME_IMAGE": str(runtime_image),
-        "MODAL_RUNTIME_ARGS_JSON": json.dumps(profile.get("runtime_args") or {}),
+        "MODAL_RUNTIME_ARGS_JSON": json.dumps(runtime_args),
         "MODAL_TOOL_PARSER": str(profile.get("tool_parser") or "none"),
         "MODAL_GENERATION_CONFIG_MODE": str(profile.get("generation_config_mode") or "vllm"),
         "MODAL_ENVIRONMENT": settings.modal_environment,
         "MODAL_APP_PREFIX": settings.modal_app_prefix,
     }
+    if family == "gguf":
+        env["MODAL_GGUF_RUNTIME"] = "llamacpp"
+        env["MODAL_GGUF_FILE"] = str(runtime_args["gguf_file"])
+        env["MODAL_GGUF_BASE_MODEL"] = str(resolved.get("base_model") or "")
+        env["MODAL_GGUF_HAS_CONFIG"] = "true" if resolved.get("has_config") else "false"
+        env["MODAL_LLAMA_SERVER_BINARY"] = str(config.get("llama_server_binary") or "llama-server")
+        env["MODAL_LOCAL_LLAMA_PORT"] = str(config.get("local_llama_port") or 8001)
     if profile.get("reasoning_parser"):
         env["MODAL_REASONING_PARSER"] = str(profile["reasoning_parser"])
     if profile.get("default_temperature") is not None:
@@ -103,7 +144,7 @@ async def _run_modal_runtime(env: dict[str, str]) -> dict[str, Any]:
 
 
 async def deploy_model(model: LlmModel, profile: dict[str, Any], default_image: str | None = None) -> dict[str, Any]:
-    env = _modal_env(model, profile, default_image=default_image)
+    env = await _modal_env(model, profile, default_image=default_image)
     result = await _run_modal_runtime(env)
     deployment_ref = result.get("app_id") or result.get("app_name")
     provider_config = {

@@ -21,6 +21,10 @@ def _get_env(name: str, default: str = "") -> str:
 
 
 LOCAL_VLLM_PORT = int(_get_env("MODAL_LOCAL_VLLM_PORT", "8000"))
+MODEL_FAMILY = _get_env("MODAL_MODEL_FAMILY")
+LOCAL_LLAMA_PORT = int(_get_env("MODAL_LOCAL_LLAMA_PORT", "8001"))
+LLAMA_SERVER_BINARY = _get_env("MODAL_LLAMA_SERVER_BINARY", "llama-server")
+GGUF_FILE = _get_env("MODAL_GGUF_FILE")
 
 
 def _build_image() -> modal.Image:
@@ -31,7 +35,7 @@ def _build_image() -> modal.Image:
             "ENV PYTHONUNBUFFERED=1",
             "RUN ln -sf $(which python3) /usr/local/bin/python || true",
         ],
-    ).entrypoint([])
+    ).pip_install("fastapi", "httpx").entrypoint([])
 
 
 APP_NAME = _get_env("MODAL_APP_NAME") or "unchained-modal-app"
@@ -71,7 +75,7 @@ volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 app = modal.App(APP_NAME)
 
 
-def _server_command_with(env: dict[str, str]) -> list[str]:
+def _vllm_server_command_with(env: dict[str, str]) -> list[str]:
     model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
     max_model_len = env.get("MODAL_MAX_MODEL_LEN") or MAX_MODEL_LEN
     tool_parser = env.get("MODAL_TOOL_PARSER") or TOOL_PARSER
@@ -106,6 +110,33 @@ def _server_command_with(env: dict[str, str]) -> list[str]:
         else:
             command.extend([flag, str(value)])
     return command
+
+
+def _llama_server_command_with(env: dict[str, str]) -> list[str]:
+    model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
+    gguf_file = env.get("MODAL_GGUF_FILE") or GGUF_FILE
+    max_model_len = env.get("MODAL_MAX_MODEL_LEN") or MAX_MODEL_LEN
+    local_port = int(env.get("MODAL_LOCAL_LLAMA_PORT") or LOCAL_LLAMA_PORT)
+    binary = env.get("MODAL_LLAMA_SERVER_BINARY") or LLAMA_SERVER_BINARY
+    runtime_args = json.loads(env.get("MODAL_RUNTIME_ARGS_JSON") or "{}") or {}
+
+    command = [
+        binary,
+        "--host", "127.0.0.1",
+        "--port", str(local_port),
+        "-hf", f"{model_name}:{gguf_file}",
+        "--ctx-size", str(max_model_len),
+    ]
+    ngl = runtime_args.get("ngl")
+    if ngl is not None:
+        command.extend(["-ngl", str(ngl)])
+    if runtime_args.get("jinja"):
+        command.append("--jinja")
+    return command
+
+
+def _is_gguf_runtime(env: dict[str, str]) -> bool:
+    return (env.get("MODAL_MODEL_FAMILY") or MODEL_FAMILY).strip().lower() == "gguf"
 
 
 def _normalize_tool_call_arguments(arguments):
@@ -288,19 +319,28 @@ class _OpenAIStreamNormalizer:
         return emitted
 
 
-async def _wait_until_ready(client: httpx.AsyncClient, base_url: str, proc: subprocess.Popen[Any]) -> None:
+async def _wait_until_ready(
+    client: httpx.AsyncClient,
+    base_url: str,
+    proc: subprocess.Popen[Any],
+    runtime_name: str,
+) -> None:
     deadline = time.monotonic() + STARTUP_TIMEOUT
     while time.monotonic() < deadline:
         if proc.poll() is not None:
-            raise RuntimeError(f"vLLM process exited early with code {proc.returncode}")
-        try:
-            response = await client.get(f"{base_url}/health", timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=None))
-            if response.status_code == 200:
-                return
-        except Exception:
-            pass
+            raise RuntimeError(f"{runtime_name} process exited early with code {proc.returncode}")
+        for path in ("/health", "/v1/models"):
+            try:
+                response = await client.get(
+                    f"{base_url}{path}",
+                    timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=None),
+                )
+                if response.status_code == 200:
+                    return
+            except Exception:
+                pass
         await asyncio.sleep(1)
-    raise RuntimeError(f"vLLM did not become ready within {STARTUP_TIMEOUT}s")
+    raise RuntimeError(f"{runtime_name} did not become ready within {STARTUP_TIMEOUT}s")
 
 
 async def _close_process(proc: subprocess.Popen[Any]) -> None:
@@ -420,37 +460,60 @@ def _create_web_app() -> FastAPI:
         if not model_name:
             raise RuntimeError("MODAL_MODEL_NAME is not set in container env")
 
-        command = _server_command_with(env)
+        env["LLAMA_CACHE"] = "/cache/llama"
+        if _is_gguf_runtime(env):
+            command = _llama_server_command_with(env)
+            base_url = f"http://127.0.0.1:{int(env.get('MODAL_LOCAL_LLAMA_PORT') or LOCAL_LLAMA_PORT)}"
+            runtime_name = "llama.cpp"
+        else:
+            command = _vllm_server_command_with(env)
+            base_url = f"http://127.0.0.1:{LOCAL_VLLM_PORT}"
+            runtime_name = "vLLM"
         proc = subprocess.Popen(command, env=env)
-        base_url = f"http://127.0.0.1:{LOCAL_VLLM_PORT}"
         client = httpx.AsyncClient()
         try:
-            await _wait_until_ready(client, base_url, proc)
+            await _wait_until_ready(client, base_url, proc, runtime_name)
             web_app.state.proc = proc
             web_app.state.base_url = base_url
             web_app.state.client = client
+            web_app.state.runtime_name = runtime_name
             yield
         finally:
             await client.aclose()
             await _close_process(proc)
 
-    web_app = FastAPI(title="Modal vLLM Proxy", lifespan=lifespan)
+    web_app = FastAPI(title="Modal OpenAI Proxy", lifespan=lifespan)
 
     @web_app.get("/health")
     async def health():
         proc = web_app.state.proc
         if proc.poll() is not None:
-            return JSONResponse({"status": "error", "message": "vLLM process exited"}, status_code=503)
+            return JSONResponse({"status": "error", "message": "upstream process exited"}, status_code=503)
+        for path in ("/health", "/v1/models"):
+            try:
+                response = await web_app.state.client.get(
+                    f"{web_app.state.base_url}{path}",
+                    timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=None),
+                )
+            except Exception:
+                continue
+            if response.status_code == 200:
+                return {"status": "ok"}
+        return JSONResponse({"status": "error", "message": "upstream health unavailable"}, status_code=503)
+
+    @web_app.get("/v1/models")
+    async def models():
         try:
             response = await web_app.state.client.get(
-                f"{web_app.state.base_url}/health",
-                timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=None),
+                f"{web_app.state.base_url}/v1/models",
+                timeout=httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=None),
             )
         except Exception as exc:
-            return JSONResponse({"status": "error", "message": str(exc)[:200]}, status_code=503)
-        if response.status_code != 200:
-            return JSONResponse({"status": "error", "message": f"upstream health {response.status_code}"}, status_code=503)
-        return {"status": "ok"}
+            return JSONResponse({"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, status_code=502)
+        try:
+            return JSONResponse(response.json(), status_code=response.status_code)
+        except ValueError:
+            return JSONResponse({"error": response.text[:500]}, status_code=response.status_code)
 
     @web_app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
@@ -491,6 +554,16 @@ def _create_web_app() -> FastAPI:
                 media_type="text/event-stream",
                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
             )
+
+        if web_app.state.runtime_name == "llama.cpp":
+            try:
+                response = await web_app.state.client.post(upstream_url, json=payload, timeout=timeout)
+            except Exception as exc:
+                return JSONResponse({"error": f"{type(exc).__name__}: {str(exc)[:500]}"}, status_code=502)
+            try:
+                return JSONResponse(response.json(), status_code=response.status_code)
+            except ValueError:
+                return JSONResponse({"error": response.text[:500]}, status_code=response.status_code)
 
         stream_payload = {**payload, "stream": True}
         try:

@@ -38,7 +38,7 @@ CAPABILITIES: dict[str, ProviderCapabilities] = {
     ),
     MODAL: ProviderCapabilities(
         supports_vllm=True,
-        supports_gguf=False,
+        supports_gguf=True,
         supports_keep_warm=False,
         supports_explicit_warm=False,
         supports_terminate=False,
@@ -95,9 +95,7 @@ def normalize_provider_override(provider_override: str | None) -> str | None:
 
 
 def model_supports_provider_family(provider: str, family: str) -> bool:
-    if provider == MODAL and family == "gguf":
-        return False
-    return True
+    return provider in SUPPORTED_PROVIDERS and bool(family)
 
 
 def sync_resolve_model_provider(model: LlmModel, default_provider: str) -> str:

@@ -10,6 +10,7 @@ from app.services.provider_service import (
     get_default_provider,
     get_provider_capabilities,
     get_or_create_app_settings,
+    model_supports_provider_family,
     normalize_provider_override,
     resolve_model_provider,
 )
@@ -70,5 +71,6 @@ def test_provider_capabilities_capture_runpod_and_modal_difference():
     assert runpod["supports_keep_warm"] is True
     assert runpod["supports_gguf"] is True
     assert modal["supports_vllm"] is True
-    assert modal["supports_gguf"] is False
+    assert modal["supports_gguf"] is True
     assert modal["supports_keep_warm"] is False
+    assert model_supports_provider_family(MODAL, "gguf") is True

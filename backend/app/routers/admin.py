@@ -202,7 +202,7 @@ async def resolve_provider_preview(
 
     if effective_provider == MODAL and not modal_supports_runtime(profile):
         can_deploy = False
-        warnings.append("Modal v1 currently supports only vLLM families; GGUF remains RunPod-only.")
+        warnings.append("Modal runtime is not configured for this model family.")
 
     return ResolveProviderResponse(
         effective_provider=effective_provider,
@@ -478,7 +478,7 @@ async def deploy_model(
         profile = resolve_deploy_profile(metadata, params_b=float(model.params_b or 0), quantization=model.quantization)
         provider = await resolve_model_provider(model, db)
         if provider == MODAL and not modal_supports_runtime(profile):
-            raise HTTPException(status_code=400, detail="Modal v1 supports only vLLM families; GGUF must stay on RunPod")
+            raise HTTPException(status_code=400, detail="Modal runtime is not configured for this model family")
 
         model.gpu_type = profile["gpu_type"]
         model.gpu_count = profile["gpu_count"]
@@ -573,7 +573,7 @@ async def redeploy_model(
     metadata = await _fetch_metadata(model.hf_repo)
     profile = resolve_deploy_profile(metadata, params_b=float(model.params_b or 0), quantization=model.quantization)
     if provider == MODAL and not modal_supports_runtime(profile):
-        raise HTTPException(status_code=400, detail="Modal v1 supports only vLLM families; GGUF must stay on RunPod")
+        raise HTTPException(status_code=400, detail="Modal runtime is not configured for this model family")
 
     model.status = "deploying"
     model.provider_status = "deploying"

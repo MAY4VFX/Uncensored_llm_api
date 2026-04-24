@@ -784,6 +784,31 @@ def test_modal_stream_normalizer_unwraps_double_encoded_args():
     assert json.loads(tool_call["function"]["arguments"]) == {"filePath": "/x"}
 
 
+def test_modal_stream_normalizer_converts_gguf_stop_with_tool_call_to_tool_calls():
+    normalizer = modal_runtime._OpenAIStreamNormalizer("test-model")
+    out = normalizer.feed({
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_gguf",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": '{"query":"weather"}'},
+                }]
+            },
+            "finish_reason": "stop",
+        }]
+    })
+    final = normalizer.finalize()
+    payloads = [json.loads(x[6:]) for x in out if x.startswith("data: ")]
+    tool_chunks = [p for p in payloads if p["choices"][0]["delta"].get("tool_calls")]
+    assert len(tool_chunks) == 1
+    assert tool_chunks[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "lookup"
+    assert any(p["choices"][0]["finish_reason"] == "tool_calls" for p in payloads)
+    assert final == ["data: [DONE]\n\n"]
+
+
 def test_modal_stream_normalizer_emits_done_on_finalize():
     normalizer = modal_runtime._OpenAIStreamNormalizer("test-model")
     normalizer.start()
