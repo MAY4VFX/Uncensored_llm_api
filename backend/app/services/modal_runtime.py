@@ -171,7 +171,7 @@ def _llama_server_command_with(env: dict[str, str]) -> list[str]:
     if runtime_args.get("jinja"):
         command.append("--jinja")
     if runtime_args.get("flash_attn"):
-        command.append("-fa")
+        command.extend(["-fa", "on"])
     cache_reuse = runtime_args.get("cache_reuse")
     if cache_reuse is not None:
         command.extend(["--cache-reuse", str(cache_reuse)])
