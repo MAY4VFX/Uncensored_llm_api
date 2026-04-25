@@ -274,16 +274,25 @@ async def _stream_modal_and_track(
     full_output = []
     gpu_start = None
 
+    tool_call_chars = 0
     async for chunk in modal_service.stream_chat(request, model):
         if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
             try:
                 import json as _json
                 data = _json.loads(chunk[6:])
-                content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                delta = data.get("choices", [{}])[0].get("delta", {}) or {}
+                content = delta.get("content") or ""
                 if content:
                     if gpu_start is None:
                         gpu_start = time.monotonic()
                     full_output.append(content)
+                for tc in delta.get("tool_calls") or []:
+                    if gpu_start is None:
+                        gpu_start = time.monotonic()
+                    fn = tc.get("function") or {}
+                    args = fn.get("arguments") or ""
+                    name = fn.get("name") or ""
+                    tool_call_chars += len(args) + len(name)
             except (ValueError, IndexError, KeyError):
                 pass
         yield chunk
@@ -291,7 +300,10 @@ async def _stream_modal_and_track(
     gpu_end = time.monotonic()
     gpu_seconds = (gpu_end - gpu_start) if gpu_start else 0.0
     tokens_in = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
-    tokens_out = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}]) if full_output else 0
+    if full_output:
+        tokens_out = count_message_tokens([{"role": "assistant", "content": "".join(full_output)}])
+    else:
+        tokens_out = max(0, tool_call_chars // 4)
     actual_cost = calculate_gpu_cost(gpu_seconds, gpu_hourly, margin)
     await deduct_credits(db, user.id, actual_cost)
     await log_usage(db, user.id, api_key.id, model.id, tokens_in, tokens_out, actual_cost, gpu_seconds)

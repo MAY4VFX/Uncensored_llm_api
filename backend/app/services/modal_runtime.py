@@ -170,6 +170,17 @@ def _llama_server_command_with(env: dict[str, str]) -> list[str]:
         command.extend(["--parallel", str(parallel)])
     if runtime_args.get("jinja"):
         command.append("--jinja")
+    if runtime_args.get("flash_attn"):
+        command.append("-fa")
+    cache_reuse = runtime_args.get("cache_reuse")
+    if cache_reuse is not None:
+        command.extend(["--cache-reuse", str(cache_reuse)])
+    chat_template_kwargs = runtime_args.get("chat_template_kwargs")
+    if chat_template_kwargs:
+        command.extend([
+            "--chat-template-kwargs",
+            json.dumps(chat_template_kwargs, separators=(",", ":")),
+        ])
     if runtime_args.get("reasoning") is False:
         command.extend(["--reasoning", "off"])
     reasoning_budget = runtime_args.get("reasoning_budget")
