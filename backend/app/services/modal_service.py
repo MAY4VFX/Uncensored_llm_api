@@ -118,7 +118,11 @@ async def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: st
         runtime_args.setdefault("ngl", 999)
         runtime_args.setdefault("parallel", 1)
         runtime_args.setdefault("jinja", True)
-        runtime_args.setdefault("reasoning_budget", 1024)
+        # Disable reasoning entirely for tool-heavy agentic GGUF workloads:
+        # `--reasoning-budget 1024` adds per-turn thinking that hurts latency
+        # in agent loops where the model just needs to emit the next tool_call.
+        runtime_args.setdefault("reasoning", False)
+        runtime_args.setdefault("reasoning_budget", 0)
         runtime_image = str(config.get("image") or "ghcr.io/ggml-org/llama.cpp:server-cuda")
         gguf_env = {
             "MODAL_MODEL_FAMILY": "gguf",
