@@ -123,13 +123,12 @@ async def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: st
         # branches; without it llama.cpp re-processes ~30k tokens per turn
         # whenever LCP similarity drops below the slot's threshold.
         runtime_args.setdefault("cache_reuse", 128)
-        # Qwen3.6 ships thinking-mode ON by default and the soft `/think`
-        # `/no_think` switches are gone — the only way to disable thinking is
-        # via the chat-template kwarg. Disable for agent tool-loops; users
-        # who deploy a different family can override via provider_config.
-        ctk = dict(runtime_args.get("chat_template_kwargs") or {})
-        ctk.setdefault("enable_thinking", False)
-        runtime_args["chat_template_kwargs"] = ctk
+        # Keep thinking ON (Qwen3.6 default) so the model can plan multi-step
+        # tasks coherently — without thinking it sometimes returns empty
+        # assistant turns after a couple of tool calls and the agent loop
+        # terminates with no output. Cap budget so it doesn't burn a full
+        # 1024 thinking tokens on every trivial tool-call turn.
+        runtime_args.setdefault("reasoning_budget", 256)
         runtime_image = str(config.get("image") or "ghcr.io/ggml-org/llama.cpp:server-cuda")
         gguf_env = {
             "MODAL_MODEL_FAMILY": "gguf",
