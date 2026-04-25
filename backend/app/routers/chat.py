@@ -24,10 +24,25 @@ from app.services.usage_service import calculate_gpu_cost, count_message_tokens,
 router = APIRouter(tags=["chat"])
 
 
+MODAL_GGUF_TOOL_DEFAULT_MAX_TOKENS = 1024
+
+
 def _require_provider_capability(provider: str, capability: str, detail: str) -> None:
     capabilities = get_provider_capabilities(provider)
     if not capabilities.get(capability):
         raise HTTPException(status_code=400, detail=detail)
+
+
+def _is_modal_gguf_tool_request(request: ChatCompletionRequest, model: LlmModel, provider: str) -> bool:
+    provider_config = model.provider_config or {}
+    return provider == MODAL and provider_config.get("family") == "gguf" and bool(request.tools)
+
+
+def _default_output_tokens(request: ChatCompletionRequest, model: LlmModel, provider: str, max_possible_output: int) -> int:
+    default_output = min(8192, max_possible_output)
+    if _is_modal_gguf_tool_request(request, model, provider):
+        return min(MODAL_GGUF_TOOL_DEFAULT_MAX_TOKENS, max_possible_output)
+    return default_output
 
 
 @router.get("/v1/models/{model_slug}/status")
@@ -198,11 +213,10 @@ async def chat_completions(
         )
 
     max_possible_output = max_ctx - tokens_in_estimate - safety_margin
-    default_output = min(8192, max_possible_output)
     if request.max_tokens:
         request.max_tokens = min(request.max_tokens, max_possible_output)
     else:
-        request.max_tokens = default_output
+        request.max_tokens = _default_output_tokens(request, model, provider, max_possible_output)
 
     gpu_hourly = float(model.gpu_hourly_cost or 0)
     margin = float(model.margin_multiplier or 1.5)

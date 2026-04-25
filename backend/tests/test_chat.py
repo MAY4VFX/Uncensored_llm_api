@@ -1,9 +1,11 @@
+import hashlib
 import uuid
 from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
 
+from app.models.api_key import ApiKey
 from app.models.llm_model import LlmModel
 from app.schemas.openai import ChatCompletionRequest, ChatMessage
 from app.services.proxy_service import _build_vllm_payload
@@ -89,6 +91,127 @@ async def test_health(client: AsyncClient):
     resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_modal_gguf_tool_request_gets_short_default_max_tokens(client: AsyncClient, db_session, test_user, monkeypatch):
+    raw_key = "sk-unch-" + "a" * 64
+    api_key = ApiKey(
+        user_id=test_user.id,
+        key_prefix=raw_key[:16],
+        key_hash=hashlib.sha256(raw_key.encode()).hexdigest(),
+        name="test",
+    )
+    model = LlmModel(
+        id=uuid.uuid4(),
+        slug="modal-gguf",
+        display_name="Modal GGUF",
+        hf_repo="Youssofal/Qwen3.6-27B-Abliterated-Heretic-Uncensored-GGUF",
+        params_b=27,
+        quantization="Q4_K_M",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        deployment_ref="https://modal.example",
+        max_context_length=32768,
+        provider_config={"provider": "modal", "family": "gguf"},
+        gpu_hourly_cost=1.0,
+        margin_multiplier=1.5,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    db_session.add_all([api_key, model])
+    await db_session.commit()
+
+    captured = {}
+
+    async def fake_run_chat(request, model):
+        captured["max_tokens"] = request.max_tokens
+        return {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 1,
+            "model": request.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("app.routers.chat.check_rate_limit", AsyncMock(return_value=(True, 0)))
+    monkeypatch.setattr("app.routers.chat.modal_service.run_chat", fake_run_chat)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {raw_key}"},
+        json={
+            "model": "modal-gguf",
+            "messages": [{"role": "user", "content": "use tool"}],
+            "tools": [{"type": "function", "function": {"name": "ping", "parameters": {"type": "object"}}}],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert captured["max_tokens"] == 1024
+
+
+@pytest.mark.asyncio
+async def test_modal_gguf_keeps_explicit_max_tokens(client: AsyncClient, db_session, test_user, monkeypatch):
+    raw_key = "sk-unch-" + "b" * 64
+    api_key = ApiKey(
+        user_id=test_user.id,
+        key_prefix=raw_key[:16],
+        key_hash=hashlib.sha256(raw_key.encode()).hexdigest(),
+        name="test",
+    )
+    model = LlmModel(
+        id=uuid.uuid4(),
+        slug="modal-gguf-explicit",
+        display_name="Modal GGUF Explicit",
+        hf_repo="Youssofal/Qwen3.6-27B-Abliterated-Heretic-Uncensored-GGUF",
+        params_b=27,
+        quantization="Q4_K_M",
+        gpu_type="H100_80GB",
+        gpu_count=1,
+        status="active",
+        deployment_ref="https://modal.example",
+        max_context_length=32768,
+        provider_config={"provider": "modal", "family": "gguf"},
+        gpu_hourly_cost=1.0,
+        margin_multiplier=1.5,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    )
+    db_session.add_all([api_key, model])
+    await db_session.commit()
+
+    captured = {}
+
+    async def fake_run_chat(request, model):
+        captured["max_tokens"] = request.max_tokens
+        return {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 1,
+            "model": request.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("app.routers.chat.check_rate_limit", AsyncMock(return_value=(True, 0)))
+    monkeypatch.setattr("app.routers.chat.modal_service.run_chat", fake_run_chat)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {raw_key}"},
+        json={
+            "model": "modal-gguf-explicit",
+            "messages": [{"role": "user", "content": "use tool"}],
+            "tools": [{"type": "function", "function": {"name": "ping", "parameters": {"type": "object"}}}],
+            "max_tokens": 4096,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert captured["max_tokens"] == 4096
 
 
 @pytest.mark.asyncio
