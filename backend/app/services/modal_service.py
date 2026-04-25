@@ -116,7 +116,9 @@ async def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: st
         resolved = await _resolve_gguf(model.hf_repo)
         runtime_args.setdefault("gguf_file", resolved["gguf_file"])
         runtime_args.setdefault("ngl", 999)
+        runtime_args.setdefault("parallel", 1)
         runtime_args.setdefault("jinja", True)
+        runtime_args.setdefault("reasoning_budget", 1024)
         runtime_image = str(config.get("image") or "ghcr.io/ggml-org/llama.cpp:server-cuda")
         gguf_env = {
             "MODAL_MODEL_FAMILY": "gguf",
@@ -124,7 +126,7 @@ async def _modal_env(model: LlmModel, profile: dict[str, Any], default_image: st
             "MODAL_GGUF_FILE": str(resolved["gguf_file"]),
             "MODAL_GGUF_BASE_MODEL": str(resolved.get("base_model") or ""),
             "MODAL_GGUF_HAS_CONFIG": "true" if resolved.get("has_config") else "false",
-            "MODAL_LLAMA_SERVER_BINARY": str(config.get("llama_server_binary") or "llama-server"),
+            "MODAL_LLAMA_SERVER_BINARY": str(config.get("llama_server_binary") or "/app/llama-server"),
             "MODAL_LOCAL_LLAMA_PORT": str(config.get("local_llama_port") or 8001),
         }
 
@@ -176,10 +178,18 @@ def _run_modal_runtime_blocking(env: dict[str, str]) -> dict[str, Any]:
     )
     if proc.returncode != 0:
         raise ModalProviderError(proc.stderr.strip() or proc.stdout.strip() or "Modal runtime deploy failed")
+    stdout = proc.stdout.strip()
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
     try:
-        return json.loads(proc.stdout.strip())
+        return json.loads(stdout)
     except json.JSONDecodeError as exc:
-        raise ModalProviderError(f"Modal runtime returned invalid JSON: {proc.stdout.strip()}") from exc
+        raise ModalProviderError(f"Modal runtime returned invalid JSON: {stdout}") from exc
 
 
 async def _run_modal_runtime(env: dict[str, str]) -> dict[str, Any]:

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -33,13 +34,16 @@ def _build_image() -> modal.Image:
     # v0.19.1 pulled in harmony stream crashes that required multiple
     # workarounds. v0.11.2 is the known-good baseline for function calling.
     runtime_image = _get_env("MODAL_RUNTIME_IMAGE") or "vllm/vllm-openai:v0.11.2"
-    return modal.Image.from_registry(
-        runtime_image,
-        setup_dockerfile_commands=[
+    image_kwargs: dict[str, object] = {
+        "setup_dockerfile_commands": [
             "ENV PYTHONUNBUFFERED=1",
             "RUN ln -sf $(which python3) /usr/local/bin/python || true",
         ],
-    ).pip_install("fastapi", "httpx").entrypoint([])
+    }
+    if runtime_image.startswith("ghcr.io/ggml-org/llama.cpp:"):
+        image_kwargs["add_python"] = "3.12"
+    image = modal.Image.from_registry(runtime_image, **image_kwargs).entrypoint([])
+    return image.pip_install("fastapi", "httpx")
 
 
 APP_NAME = _get_env("MODAL_APP_NAME") or "unchained-modal-app"
@@ -120,26 +124,57 @@ def _vllm_server_command_with(env: dict[str, str]) -> list[str]:
     return command
 
 
+def _resolve_executable(binary: str, candidates: list[str]) -> str:
+    if os.path.isabs(binary) and os.path.exists(binary):
+        return binary
+    resolved = shutil.which(binary)
+    if resolved:
+        return resolved
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return binary
+
+
 def _llama_server_command_with(env: dict[str, str]) -> list[str]:
     model_name = env.get("MODAL_MODEL_NAME") or MODEL_NAME
     gguf_file = env.get("MODAL_GGUF_FILE") or GGUF_FILE
     max_model_len = env.get("MODAL_MAX_MODEL_LEN") or MAX_MODEL_LEN
     local_port = int(env.get("MODAL_LOCAL_LLAMA_PORT") or LOCAL_LLAMA_PORT)
-    binary = env.get("MODAL_LLAMA_SERVER_BINARY") or LLAMA_SERVER_BINARY
+    binary = _resolve_executable(
+        env.get("MODAL_LLAMA_SERVER_BINARY") or LLAMA_SERVER_BINARY,
+        [
+            "/app/llama-server",
+            "/usr/local/bin/llama-server",
+            "/usr/bin/llama-server",
+            "/bin/llama-server",
+            "/llama-server",
+            "/server",
+        ],
+    )
     runtime_args = json.loads(env.get("MODAL_RUNTIME_ARGS_JSON") or "{}") or {}
 
     command = [
         binary,
         "--host", "127.0.0.1",
         "--port", str(local_port),
-        "-hf", f"{model_name}:{gguf_file}",
+        "--hf-repo", model_name,
+        "--hf-file", gguf_file,
         "--ctx-size", str(max_model_len),
     ]
     ngl = runtime_args.get("ngl")
     if ngl is not None:
         command.extend(["-ngl", str(ngl)])
+    parallel = runtime_args.get("parallel")
+    if parallel is not None:
+        command.extend(["--parallel", str(parallel)])
     if runtime_args.get("jinja"):
         command.append("--jinja")
+    if runtime_args.get("reasoning") is False:
+        command.extend(["--reasoning", "off"])
+    reasoning_budget = runtime_args.get("reasoning_budget")
+    if reasoning_budget is not None:
+        command.extend(["--reasoning-budget", str(reasoning_budget)])
     return command
 
 
@@ -619,7 +654,8 @@ def openai_api():
 
 
 def deploy() -> dict[str, object]:
-    deployed_app = app.deploy(name=APP_NAME, environment_name=ENVIRONMENT_NAME)
+    with modal.enable_output():
+        deployed_app = app.deploy(name=APP_NAME, environment_name=ENVIRONMENT_NAME)
     function = modal.Function.from_name(APP_NAME, FUNCTION_NAME, environment_name=ENVIRONMENT_NAME)
     web_url = function.get_web_url()
     return {
