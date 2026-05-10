@@ -44,6 +44,13 @@ FAMILY_LIMITS = {
         # item is 2496 tokens — bigger than the default 2048 batched
         # tokens. Bump batched-tokens to 8192 so the multimodal budget
         # fits even though we proxy text only.
+        # Skip torch.compile / CUDA graph capture: with TRITON_ATTN
+        # backend (forced because Gemma 4 has heterogeneous head dims)
+        # plus the MoE arch, inductor compile takes 5+ min and Modal's
+        # ASGI lifespan_startup hits its KeyboardInterrupt deadline
+        # before vLLM is ready. Eager mode adds ~10-15% decode latency
+        # but lets the engine actually finish booting.
+        "enforce_eager": True,
         "runtime_args": {
             "trust_remote_code": True,
             "max_num_batched_tokens": 8192,
