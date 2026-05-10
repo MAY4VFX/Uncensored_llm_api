@@ -31,6 +31,10 @@ FAMILY_LIMITS = {
         "reasoning_parser": "qwen3",
         "default_temperature": 0.2,
         "modal_docker_image": "vllm/vllm-openai:v0.20.2",
+        # AWQ in vLLM requires float16 weights; vLLM picks bfloat16 by
+        # default and crashes at config validation ("torch.bfloat16 is
+        # not supported for quantization method awq"). Pin dtype.
+        "runtime_args": {"dtype": "float16"},
     },
     "gpt_oss": {
         "native_context": 128000,
