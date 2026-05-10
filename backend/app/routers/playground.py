@@ -20,6 +20,8 @@ from app.services.usage_service import calculate_gpu_cost, count_message_tokens,
 
 router = APIRouter(prefix="/playground", tags=["playground"])
 
+MODAL_GGUF_TOOL_DEFAULT_MAX_TOKENS = 1024
+
 
 @router.post("/chat")
 async def playground_chat(
@@ -44,6 +46,8 @@ async def playground_chat(
     max_possible_output = max(1, max_ctx - tokens_in_estimate)
     if request.max_tokens:
         request.max_tokens = min(request.max_tokens, max_possible_output)
+    elif provider == MODAL and (model.provider_config or {}).get("family") == "gguf" and request.tools:
+        request.max_tokens = min(MODAL_GGUF_TOOL_DEFAULT_MAX_TOKENS, max_possible_output)
     else:
         request.max_tokens = max_possible_output
 
