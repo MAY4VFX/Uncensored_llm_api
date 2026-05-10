@@ -39,8 +39,15 @@ FAMILY_LIMITS = {
         "default_temperature": 0.2,
         "modal_docker_image": "vllm/vllm-openai:v0.20.2",
         # Gemma 4 ships with custom modeling code; vLLM recipe asks for
-        # trust_remote_code. Pass it via runtime_args.
-        "runtime_args": {"trust_remote_code": True},
+        # trust_remote_code. Also vLLM forces --disable_chunked_mm_input
+        # for Gemma 4's multimodal-bidirectional attention, and one image
+        # item is 2496 tokens — bigger than the default 2048 batched
+        # tokens. Bump batched-tokens to 8192 so the multimodal budget
+        # fits even though we proxy text only.
+        "runtime_args": {
+            "trust_remote_code": True,
+            "max_num_batched_tokens": 8192,
+        },
     },
     "qwen35_moe": {
         "native_context": 262144,
