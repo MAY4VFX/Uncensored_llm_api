@@ -23,6 +23,22 @@ FAMILY_LIMITS = {
         "tool_parser": "hermes",
         "default_temperature": 0.2,
     },
+    "gemma4": {
+        # Gemma 4 family (Google, 2026): unified multimodal arch with
+        # native tool calling and a dedicated vLLM parser.
+        # 21B-A4B variant fits in A100 80GB FP16 with ~30 GB free for KV.
+        # Native context for the 21B-A4B variant is 131072 (config check).
+        "native_context": 131072,
+        "practical_cap": 131072,
+        "preferred_gpu": "A100_80GB",
+        "tool_parser": "gemma4",
+        "reasoning_parser": "gemma4",
+        "default_temperature": 0.2,
+        "modal_docker_image": "vllm/vllm-openai:v0.20.2",
+        # Gemma 4 ships with custom modeling code; vLLM recipe asks for
+        # trust_remote_code. Pass it via runtime_args.
+        "runtime_args": {"trust_remote_code": True},
+    },
     "qwen35_moe": {
         "native_context": 262144,
         "practical_cap": 262144,
@@ -137,6 +153,14 @@ def _detect_family(metadata: dict) -> str:
     ):
         return "gpt_oss"
     if (
+        "gemma4" in tags
+        or "gemma-4" in repo
+        or "gemma_4" in repo
+        or "gemma-4" in base_text
+        or "gemma4" in base_text
+    ):
+        return "gemma4"
+    if (
         "qwen3_5_moe" in tags
         or "qwen3.5" in repo
         or "qwen3.6" in repo
@@ -209,6 +233,9 @@ def _coerce_minimum_context(family: str, gpu_type: str, computed_context: int) -
         # Earlier 131k floor came from a dense-model formula that
         # over-estimated KV by ~75x — drop it for the actual native cap.
         ("qwen35_moe", "H200_141GB"): 262144,
+        # Gemma 4 21B-A4B: hybrid attention (sliding+global) keeps KV
+        # cache modest. 64k is a safe practical floor on A100 80GB.
+        ("gemma4", "A100_80GB"): 65536,
         ("gpt_oss", "H200_141GB"): 128000,
     }
     return max(computed_context, minimums.get((family, gpu_type), 4096))
