@@ -31,35 +31,6 @@ FAMILY_LIMITS = {
         "reasoning_parser": "qwen3",
         "default_temperature": 0.2,
         "modal_docker_image": "vllm/vllm-openai:v0.20.2",
-        # AWQ in vLLM requires float16 weights; default bfloat16 fails
-        # config validation. Auto-round AWQ MoE checkpoints record
-        # weights as uint4 (no ZP bias), incompatible with AWQ-Marlin
-        # which expects uint4b8 — force moe_wna16 to bypass Marlin.
-        # Qwen3.5/3.6 VL config records modules_to_not_convert with a
-        # `model.` prefix that does NOT match vLLM's internal module
-        # names (visual.* / language_model.*), so the vision tower
-        # gets AWQ-packed and create_weights raises "input size is not
-        # aligned with the quantized weight shape". Override the full
-        # quantization_config (vLLM replaces, not merges) with the
-        # exact original fields plus a corrected modules_to_not_convert
-        # list (prefix stripped).
-        "runtime_args": {
-            "dtype": "float16",
-            "quantization": "moe_wna16",
-            "hf_overrides": (
-                '{"quantization_config":{'
-                '"quant_method":"awq","bits":4,"group_size":128,'
-                '"version":"gemm","zero_point":false,"sym":true,'
-                '"modules_to_not_convert":['
-                '"visual.blocks","visual.merger.linear_fc1",'
-                '"visual.merger.linear_fc2","lm_head",'
-                + ",".join(
-                    f'"language_model.layers.{i}.mlp.shared_expert_gate"'
-                    for i in range(40)
-                )
-                + "]}}"
-            ),
-        },
     },
     "gpt_oss": {
         "native_context": 128000,
@@ -223,7 +194,7 @@ def _coerce_minimum_context(family: str, gpu_type: str, computed_context: int) -
     minimums = {
         ("qwen3_coder", "H200_141GB"): 204800,
         ("qwen3_general", "H200_141GB"): 131072,
-        ("qwen35_moe", "H200_141GB"): 262144,
+        ("qwen35_moe", "H200_141GB"): 131072,
         ("gpt_oss", "H200_141GB"): 128000,
     }
     return max(computed_context, minimums.get((family, gpu_type), 4096))
