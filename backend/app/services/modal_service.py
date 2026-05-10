@@ -293,7 +293,12 @@ async def get_status(model: LlmModel) -> dict[str, Any]:
     health_url = web_url.rstrip("/") + "/health"
     result: dict[str, Any]
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=8.0, read=8.0, write=8.0, pool=None)) as client:
+        # Read timeout must outlast vLLM's longest single-step latency. While
+        # the engine is generating a heavy thinking response the event loop
+        # can briefly delay /health by several seconds; an 8s ceiling falsely
+        # flips the UI to "Warming up" on a hot container. 30s leaves room
+        # for that and is still well under any realistic cold-start window.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=8.0, read=30.0, write=8.0, pool=None)) as client:
             response = await client.get(health_url)
             if response.status_code == 200:
                 result = {

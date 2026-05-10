@@ -49,6 +49,12 @@ class ChatCompletionRequest(BaseModel):
     frequency_penalty: float | None = None
     logit_bias: dict | None = None
     user: str | None = None
+    # OpenAI-style thinking budget control (low/medium/high). vLLM 0.20+
+    # maps this to a reasoning-token budget for models served with a
+    # reasoning_parser. Optional explicit override knobs follow.
+    reasoning_effort: str | None = None
+    reasoning_budget: int | None = None
+    chat_template_kwargs: dict | None = None
 
 
 class Choice(BaseModel):

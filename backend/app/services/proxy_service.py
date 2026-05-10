@@ -93,6 +93,25 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
     if request.frequency_penalty is not None:
         payload["frequency_penalty"] = request.frequency_penalty
 
+    # Thinking-budget control. Forward client knobs verbatim; if the client
+    # didn't pick one, default thinking-capable models to "low" so simple
+    # prompts don't burn 60+ s of reasoning ("hi" → 2k thinking tokens).
+    # Clients that want deep reasoning send reasoning_effort="high" explicitly.
+    hf_repo_lower = (model.hf_repo or "").lower()
+    is_thinking_model = (
+        "qwen3.5" in hf_repo_lower
+        or "qwen3.6" in hf_repo_lower
+        or "gpt-oss" in hf_repo_lower
+    )
+    if request.reasoning_effort is not None:
+        payload["reasoning_effort"] = request.reasoning_effort
+    elif is_thinking_model:
+        payload["reasoning_effort"] = "low"
+    if request.reasoning_budget is not None:
+        payload["reasoning_budget"] = request.reasoning_budget
+    if request.chat_template_kwargs is not None:
+        payload["chat_template_kwargs"] = request.chat_template_kwargs
+
     # Patch for GPT-OSS harmony parser crashes.
     # OpenAI's gpt-oss release treats BOTH `<|return|>` (199999) AND `<|call|>`
     # (200012) as EOS tokens (see openai/gpt-oss HF commit #105, 2025-08-13).
