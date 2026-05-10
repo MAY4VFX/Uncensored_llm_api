@@ -31,6 +31,15 @@ FAMILY_LIMITS = {
         "reasoning_parser": "qwen3",
         "default_temperature": 0.2,
         "modal_docker_image": "vllm/vllm-openai:v0.20.2",
+        # Qwen3.5/3.6 ship as Qwen3_5MoeForConditionalGeneration (a
+        # multimodal VL arch with a vision tower). Many community
+        # finetunes / abliterations strip the vision weights to save
+        # space, so vLLM's standard loader raises "Following weights
+        # were not initialized from checkpoint: {visual.*...}".
+        # --language-model-only tells vLLM to skip the vision tower
+        # and serve text-only. Per QuantTrio's official recipe this
+        # is the recommended switch when not using vision.
+        "runtime_args": {"language_model_only": True},
     },
     "gpt_oss": {
         "native_context": 128000,
