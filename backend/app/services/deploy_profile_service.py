@@ -203,7 +203,12 @@ def _coerce_minimum_context(family: str, gpu_type: str, computed_context: int) -
     minimums = {
         ("qwen3_coder", "H200_141GB"): 204800,
         ("qwen3_general", "H200_141GB"): 131072,
-        ("qwen35_moe", "H200_141GB"): 131072,
+        # Qwen3.5/3.6 MoE uses linear attention in 30/40 layers (only 10
+        # full-attention layers carry KV cache). Per-token KV is ~20 KB,
+        # so 262k native context fits in <6 GB on top of 70 GB weights.
+        # Earlier 131k floor came from a dense-model formula that
+        # over-estimated KV by ~75x — drop it for the actual native cap.
+        ("qwen35_moe", "H200_141GB"): 262144,
         ("gpt_oss", "H200_141GB"): 128000,
     }
     return max(computed_context, minimums.get((family, gpu_type), 4096))
