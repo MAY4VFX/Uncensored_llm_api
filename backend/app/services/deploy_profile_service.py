@@ -24,12 +24,15 @@ FAMILY_LIMITS = {
         "default_temperature": 0.2,
     },
     "gemma4": {
-        # Gemma 4 family (Google, 2026): unified multimodal arch with
-        # native tool calling and a dedicated vLLM parser.
-        # 21B-A4B variant fits in A100 80GB FP16 with ~30 GB free for KV.
-        # Native context for the 21B-A4B variant is 131072 (config check).
-        "native_context": 131072,
-        "practical_cap": 131072,
+        # Gemma 4 family (Google, 2026): multimodal MoE with hybrid
+        # attention (sliding-window + global) and native tool/reasoning
+        # parsers in vLLM 0.20+. Verified config for the 21B-A4B variant:
+        # max_position_embeddings=262144, ~20 KB KV per token (5 full
+        # attn layers × 2 KV × 2 heads × 512 head_dim × 2 bytes).
+        # 21B FP16 weights ~42 GB; on A100 80GB that leaves ~30 GB for
+        # KV — enough for 1.5M tokens, far more than native cap.
+        "native_context": 262144,
+        "practical_cap": 262144,
         "preferred_gpu": "A100_80GB",
         "tool_parser": "gemma4",
         "reasoning_parser": "gemma4",
@@ -204,8 +207,11 @@ def _estimate_safe_context(params_b: float, quantization: str, vram_gb: int, fam
     if free_vram <= 0:
         return 4096
 
-    if family.startswith("qwen3"):
-        kv_per_4k = max(params_b * 0.045, 1.0)
+    if family.startswith("qwen3") or family == "gemma4":
+        # Hybrid-attention MoE families (Qwen3.5/3.6 with linear attn,
+        # Gemma 4 with sliding+global). Effective KV is ~20 KB/token —
+        # roughly 80 MB per 4k window.
+        kv_per_4k = max(params_b * 0.045, 0.1)
     elif family == "gpt_oss":
         kv_per_4k = max(params_b * 0.02, 1.0)
     else:
@@ -233,9 +239,11 @@ def _coerce_minimum_context(family: str, gpu_type: str, computed_context: int) -
         # Earlier 131k floor came from a dense-model formula that
         # over-estimated KV by ~75x — drop it for the actual native cap.
         ("qwen35_moe", "H200_141GB"): 262144,
-        # Gemma 4 21B-A4B: hybrid attention (sliding+global) keeps KV
-        # cache modest. 64k is a safe practical floor on A100 80GB.
-        ("gemma4", "A100_80GB"): 65536,
+        # Gemma 4 21B-A4B on A100 80GB: with weights ~42 GB and
+        # ~20 KB KV/token, native 262k easily fits. Floor at full
+        # native so the deploy profile doesn't truncate it via the
+        # generic dense formula.
+        ("gemma4", "A100_80GB"): 262144,
         ("gpt_oss", "H200_141GB"): 128000,
     }
     return max(computed_context, minimums.get((family, gpu_type), 4096))
