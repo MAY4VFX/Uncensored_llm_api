@@ -340,6 +340,31 @@ def _modal_web_url(model: LlmModel) -> str:
     return str(web_url).rstrip("/")
 
 
+def _apply_thinking_budget(
+    payload: dict, request: ChatCompletionRequest, model: LlmModel
+) -> None:
+    """Forward client-supplied reasoning knobs and default thinking-capable
+    models to a shallow reasoning_effort=low so trivial prompts (and big
+    agentic prompts on a thinking model) don't burn unbounded tokens on
+    internal reasoning before producing tool_calls / content.
+    """
+    if getattr(request, "reasoning_effort", None) is not None:
+        payload["reasoning_effort"] = request.reasoning_effort
+    else:
+        hf_repo_lower = (model.hf_repo or "").lower()
+        is_thinking_model = (
+            "qwen3.5" in hf_repo_lower
+            or "qwen3.6" in hf_repo_lower
+            or "gpt-oss" in hf_repo_lower
+        )
+        if is_thinking_model:
+            payload["reasoning_effort"] = "low"
+    if getattr(request, "reasoning_budget", None) is not None:
+        payload["reasoning_budget"] = request.reasoning_budget
+    if getattr(request, "chat_template_kwargs", None) is not None:
+        payload["chat_template_kwargs"] = request.chat_template_kwargs
+
+
 def _patch_gpt_oss_stops(payload: dict, model: LlmModel) -> None:
     # Same workaround as proxy_service for RunPod path: gpt-oss harmony
     # parser crashes with HarmonyError when model emits 200012 (<|call|>)
@@ -529,6 +554,7 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
         payload["tool_choice"] = request.tool_choice
     if request.response_format is not None:
         payload["response_format"] = request.response_format
+    _apply_thinking_budget(payload, request, model)
     _patch_gpt_oss_stops(payload, model)
 
     content_parts: list[str] = []
@@ -663,6 +689,7 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
         payload["tool_choice"] = request.tool_choice
     if request.response_format is not None:
         payload["response_format"] = request.response_format
+    _apply_thinking_budget(payload, request, model)
     _patch_gpt_oss_stops(payload, model)
 
     queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
