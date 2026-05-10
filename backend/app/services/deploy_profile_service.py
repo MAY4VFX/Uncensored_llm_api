@@ -35,7 +35,14 @@ FAMILY_LIMITS = {
         # config validation. Auto-round AWQ MoE checkpoints record
         # weights as uint4 (no ZP bias), incompatible with AWQ-Marlin
         # which expects uint4b8 — force moe_wna16 to bypass Marlin.
-        "runtime_args": {"dtype": "float16", "quantization": "moe_wna16"},
+        # Qwen3.5/3.6 VL ships a vision tower whose MLP shapes don't
+        # align with AWQ packing; auto-round didn't list it in
+        # modules_to_not_convert. Patch hf config to keep vision in FP16.
+        "runtime_args": {
+            "dtype": "float16",
+            "quantization": "moe_wna16",
+            "hf_overrides": '{"quantization_config":{"modules_to_not_convert":["visual","visual.*","lm_head"]}}',
+        },
     },
     "gpt_oss": {
         "native_context": 128000,
