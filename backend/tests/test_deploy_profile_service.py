@@ -64,6 +64,26 @@ def test_gpt_oss_prefers_h200_openai_and_128k_context():
 
 
 
+def test_qwen35_moe_routes_to_qwen3_coder_parser_and_pinned_image():
+    metadata = {
+        "id": "genevera/Qwen3.6-35B-A3B-Abliterated-Heretic-AWQ-4bit",
+        "tags": ["qwen3_5_moe", "qwen3.6", "qwen3-moe", "awq", "4bit"],
+        "cardData": {
+            "base_model": ["Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-BF16"],
+        },
+        "siblings": [{"rfilename": "config.json"}],
+    }
+
+    profile = resolve_deploy_profile(metadata, params_b=35.0, quantization="Q4")
+
+    assert profile["family"] == "qwen35_moe"
+    assert profile["tool_parser"] == "qwen3_coder"
+    assert profile["reasoning_parser"] == "qwen3"
+    assert profile["gpu_type"] == "H200_141GB"
+    assert profile["target_context"] >= 262144
+    assert profile["modal_docker_image"] == "vllm/vllm-openai:v0.20.2"
+
+
 def test_unknown_model_uses_conservative_fallback_profile():
     metadata = {
         "id": "someone/unknown-model",

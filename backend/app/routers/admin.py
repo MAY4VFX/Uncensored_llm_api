@@ -308,11 +308,13 @@ def _determine_quant(data: dict) -> str:
     tags = [t.lower() for t in data.get("tags", [])]
     if "gguf" in tags:
         return "Q4"
+    if any(t in tags for t in ("awq", "4bit", "4-bit", "int4", "gptq")):
+        return "Q4"
     for s in data.get("siblings", []):
         fname = s.get("rfilename", "").lower()
-        if "q4" in fname:
+        if "q4" in fname or "awq" in fname or "int4" in fname or "4bit" in fname:
             return "Q4"
-        if "q8" in fname:
+        if "q8" in fname or "int8" in fname or "8bit" in fname:
             return "Q8"
         if "fp16" in fname or "f16" in fname:
             return "FP16"

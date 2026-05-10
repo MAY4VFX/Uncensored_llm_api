@@ -23,6 +23,15 @@ FAMILY_LIMITS = {
         "tool_parser": "hermes",
         "default_temperature": 0.2,
     },
+    "qwen35_moe": {
+        "native_context": 262144,
+        "practical_cap": 262144,
+        "preferred_gpu": "H200_141GB",
+        "tool_parser": "qwen3_coder",
+        "reasoning_parser": "qwen3",
+        "default_temperature": 0.2,
+        "modal_docker_image": "vllm/vllm-openai:v0.20.2",
+    },
     "gpt_oss": {
         "native_context": 128000,
         "practical_cap": 128000,
@@ -118,6 +127,14 @@ def _detect_family(metadata: dict) -> str:
         or "gpt-oss" in tags
     ):
         return "gpt_oss"
+    if (
+        "qwen3_5_moe" in tags
+        or "qwen3.5" in repo
+        or "qwen3.6" in repo
+        or "qwen3.5" in base_text
+        or "qwen3.6" in base_text
+    ):
+        return "qwen35_moe"
     if "coder" in repo or "coder" in base_text:
         if "qwen3" in repo or "qwen3" in base_text or "qwen3_moe" in tags:
             return "qwen3_coder"
@@ -177,6 +194,7 @@ def _coerce_minimum_context(family: str, gpu_type: str, computed_context: int) -
     minimums = {
         ("qwen3_coder", "H200_141GB"): 204800,
         ("qwen3_general", "H200_141GB"): 131072,
+        ("qwen35_moe", "H200_141GB"): 262144,
         ("gpt_oss", "H200_141GB"): 128000,
     }
     return max(computed_context, minimums.get((family, gpu_type), 4096))
@@ -222,7 +240,11 @@ def resolve_deploy_profile(metadata: dict, params_b: float, quantization: str) -
     # For Modal path, force the known-good gpt-oss image. RunPod path
     # overrides this back to "" inside admin.py so it can resolve the
     # proper worker-v1-vllm image instead.
-    modal_docker_image = docker_image or ("vllm/vllm-openai:v0.11.2" if family == "gpt_oss" else "")
+    modal_docker_image = (
+        docker_image
+        or limits.get("modal_docker_image")
+        or ("vllm/vllm-openai:v0.11.2" if family == "gpt_oss" else "")
+    )
 
     runtime_args = dict(limits.get("runtime_args", {}))
 
