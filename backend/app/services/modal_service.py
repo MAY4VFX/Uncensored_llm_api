@@ -343,35 +343,57 @@ def _modal_web_url(model: LlmModel) -> str:
 def _apply_thinking_budget(
     payload: dict, request: ChatCompletionRequest, model: LlmModel
 ) -> None:
-    """Forward client-supplied reasoning knobs and default thinking-capable
-    models to a shallow reasoning_effort=low so trivial prompts (and big
-    agentic prompts on a thinking model) don't burn unbounded tokens on
-    internal reasoning before producing tool_calls / content.
+    """Default thinking-capable models to OFF and forward client-supplied
+    reasoning knobs.
+
+    Most OpenAI-compatible clients (OpenClaude, Cline, Cursor, OpenWebUI,
+    LangChain) expect plain content + tool_calls. A free-running thinking
+    block sits silently in delta.reasoning, eats max_tokens, and the
+    client's parser either renders nothing or errors out.
+
+    Default behaviour:
+      - Qwen3.5 / 3.6: chat_template_kwargs={"enable_thinking": False}.
+        This is the only switch the Qwen3 chat template honors — vLLM's
+        reasoning_effort field is not mapped to a budget here.
+      - gpt-oss: reasoning_effort="low" (vLLM maps this to a real cap)
+        plus reasoning_budget=256 as a belt-and-braces stop.
+      - Gemma 4: leave reasoning on; the gemma4 parser handles it.
+
+    The client always wins: if it sends chat_template_kwargs,
+    reasoning_effort, or reasoning_budget, we forward verbatim and skip
+    every default below. Agents that want deep reasoning send
+    chat_template_kwargs={"enable_thinking": True} (Qwen3) or
+    reasoning_effort="high" (gpt-oss).
     """
     hf_repo_lower = (model.hf_repo or "").lower()
-    is_thinking_model = (
-        "qwen3.5" in hf_repo_lower
-        or "qwen3.6" in hf_repo_lower
-        or "gpt-oss" in hf_repo_lower
+    is_qwen3_thinking = (
+        "qwen3.5" in hf_repo_lower or "qwen3.6" in hf_repo_lower
     )
-    if getattr(request, "reasoning_effort", None) is not None:
-        payload["reasoning_effort"] = request.reasoning_effort
-    elif is_thinking_model:
-        payload["reasoning_effort"] = "low"
+    is_gpt_oss = "gpt-oss" in hf_repo_lower
 
-    # Hard token-count caps in addition to reasoning_effort so thinking
-    # never burns the entire response budget. vLLM's reasoning_effort=low
-    # currently maps to a generous internal budget (often 1k+) which can
-    # consume the full max_tokens window on small replies — the UI then
-    # sees finish_reason=length with empty content and renders
-    # "Request failed". Default to 256 thinking tokens for low (the
-    # client can override via reasoning_budget).
-    if getattr(request, "reasoning_budget", None) is not None:
-        payload["reasoning_budget"] = request.reasoning_budget
-    elif is_thinking_model and payload.get("reasoning_effort") == "low":
+    # Forward client-supplied knobs verbatim and stop — they own the policy.
+    client_template = getattr(request, "chat_template_kwargs", None)
+    client_effort = getattr(request, "reasoning_effort", None)
+    client_budget = getattr(request, "reasoning_budget", None)
+    if client_template is not None:
+        payload["chat_template_kwargs"] = client_template
+    if client_effort is not None:
+        payload["reasoning_effort"] = client_effort
+    if client_budget is not None:
+        payload["reasoning_budget"] = client_budget
+    if any(x is not None for x in (client_template, client_effort, client_budget)):
+        return
+
+    # Server-side defaults for thinking-capable models.
+    if is_qwen3_thinking:
+        # The Qwen3 chat template honors enable_thinking; nothing else
+        # actually turns thinking off for this family.
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+    elif is_gpt_oss:
+        # gpt-oss respects reasoning_effort natively. low + a 256-token
+        # cap keeps trivial prompts cheap without losing the feature.
+        payload["reasoning_effort"] = "low"
         payload["reasoning_budget"] = 256
-    if getattr(request, "chat_template_kwargs", None) is not None:
-        payload["chat_template_kwargs"] = request.chat_template_kwargs
 
 
 def _patch_gpt_oss_stops(payload: dict, model: LlmModel) -> None:

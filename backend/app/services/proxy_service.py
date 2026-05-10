@@ -93,24 +93,33 @@ def _build_vllm_payload(request: ChatCompletionRequest, model: LlmModel, stream:
     if request.frequency_penalty is not None:
         payload["frequency_penalty"] = request.frequency_penalty
 
-    # Thinking-budget control. Forward client knobs verbatim; if the client
-    # didn't pick one, default thinking-capable models to "low" so simple
-    # prompts don't burn 60+ s of reasoning ("hi" → 2k thinking tokens).
-    # Clients that want deep reasoning send reasoning_effort="high" explicitly.
+    # Thinking control: default OFF on thinking-capable models so plain
+    # OpenAI-compatible clients (OpenClaude, Cline, OpenWebUI, LangChain)
+    # get content + tool_calls instead of reasoning that their parser
+    # silently drops. Client always wins: if it sends any of the three
+    # knobs, we forward verbatim and skip server-side defaults.
     hf_repo_lower = (model.hf_repo or "").lower()
-    is_thinking_model = (
-        "qwen3.5" in hf_repo_lower
-        or "qwen3.6" in hf_repo_lower
-        or "gpt-oss" in hf_repo_lower
+    is_qwen3_thinking = (
+        "qwen3.5" in hf_repo_lower or "qwen3.6" in hf_repo_lower
     )
-    if request.reasoning_effort is not None:
-        payload["reasoning_effort"] = request.reasoning_effort
-    elif is_thinking_model:
-        payload["reasoning_effort"] = "low"
-    if request.reasoning_budget is not None:
-        payload["reasoning_budget"] = request.reasoning_budget
-    if request.chat_template_kwargs is not None:
-        payload["chat_template_kwargs"] = request.chat_template_kwargs
+    is_gpt_oss = "gpt-oss" in hf_repo_lower
+    client_template = request.chat_template_kwargs
+    client_effort = request.reasoning_effort
+    client_budget = request.reasoning_budget
+    if client_template is not None:
+        payload["chat_template_kwargs"] = client_template
+    if client_effort is not None:
+        payload["reasoning_effort"] = client_effort
+    if client_budget is not None:
+        payload["reasoning_budget"] = client_budget
+    if all(x is None for x in (client_template, client_effort, client_budget)):
+        if is_qwen3_thinking:
+            # Only enable_thinking actually turns thinking off for the
+            # Qwen3 chat template; reasoning_effort isn't mapped here.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        elif is_gpt_oss:
+            payload["reasoning_effort"] = "low"
+            payload["reasoning_budget"] = 256
 
     # Patch for GPT-OSS harmony parser crashes.
     # OpenAI's gpt-oss release treats BOTH `<|return|>` (199999) AND `<|call|>`
