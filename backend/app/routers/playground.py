@@ -43,7 +43,13 @@ async def playground_chat(
     tokens_in_estimate = count_message_tokens([{"role": m.role, "content": m.content} for m in request.messages])
     max_ctx = model.max_context_length or 4096
 
-    max_possible_output = max(1, max_ctx - tokens_in_estimate)
+    # tiktoken cl100k_base under-counts vs the actual model tokenizer
+    # (Qwen3 sentencepiece, Gemma 4 SentencePiece-MM, etc.) by 1–N tokens
+    # per message. Without a margin, max_tokens = max_ctx - estimate
+    # overflows max_model_len at vLLM tokenize time and the request
+    # 400s with VLLMValidationError. Same margin chat.py already uses.
+    safety_margin = max(256, int(tokens_in_estimate * 0.1))
+    max_possible_output = max(1, max_ctx - tokens_in_estimate - safety_margin)
     if request.max_tokens:
         request.max_tokens = min(request.max_tokens, max_possible_output)
     elif provider == MODAL and (model.provider_config or {}).get("family") == "gguf" and request.tools:
