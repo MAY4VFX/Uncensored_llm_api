@@ -348,19 +348,28 @@ def _apply_thinking_budget(
     agentic prompts on a thinking model) don't burn unbounded tokens on
     internal reasoning before producing tool_calls / content.
     """
+    hf_repo_lower = (model.hf_repo or "").lower()
+    is_thinking_model = (
+        "qwen3.5" in hf_repo_lower
+        or "qwen3.6" in hf_repo_lower
+        or "gpt-oss" in hf_repo_lower
+    )
     if getattr(request, "reasoning_effort", None) is not None:
         payload["reasoning_effort"] = request.reasoning_effort
-    else:
-        hf_repo_lower = (model.hf_repo or "").lower()
-        is_thinking_model = (
-            "qwen3.5" in hf_repo_lower
-            or "qwen3.6" in hf_repo_lower
-            or "gpt-oss" in hf_repo_lower
-        )
-        if is_thinking_model:
-            payload["reasoning_effort"] = "low"
+    elif is_thinking_model:
+        payload["reasoning_effort"] = "low"
+
+    # Hard token-count caps in addition to reasoning_effort so thinking
+    # never burns the entire response budget. vLLM's reasoning_effort=low
+    # currently maps to a generous internal budget (often 1k+) which can
+    # consume the full max_tokens window on small replies — the UI then
+    # sees finish_reason=length with empty content and renders
+    # "Request failed". Default to 256 thinking tokens for low (the
+    # client can override via reasoning_budget).
     if getattr(request, "reasoning_budget", None) is not None:
         payload["reasoning_budget"] = request.reasoning_budget
+    elif is_thinking_model and payload.get("reasoning_effort") == "low":
+        payload["reasoning_budget"] = 256
     if getattr(request, "chat_template_kwargs", None) is not None:
         payload["chat_template_kwargs"] = request.chat_template_kwargs
 
