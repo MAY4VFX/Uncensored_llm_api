@@ -41,7 +41,15 @@ async def _get_shared_client() -> httpx.AsyncClient:
                     limits=httpx.Limits(
                         max_connections=200,
                         max_keepalive_connections=50,
-                        keepalive_expiry=30.0,
+                        # Short keepalive_expiry so idle TLS sessions to
+                        # Modal don't sit long enough to be evicted by
+                        # Modal's edge while still cached on our side.
+                        # When that happens, the reused connection is
+                        # silently dead and the next request stalls in
+                        # SSL handshake until ConnectTimeout (~20 s).
+                        # 5 s keeps reuse for burst traffic without
+                        # holding zombie sockets.
+                        keepalive_expiry=5.0,
                     ),
                     follow_redirects=True,
                 )
@@ -594,8 +602,17 @@ async def run_chat(request: ChatCompletionRequest, model: LlmModel) -> dict[str,
             await asyncio.sleep(2 + attempt * 3)
             continue
         except httpx.ConnectTimeout as exc:
-            # Не ретраить: Modal LB уже принял попытку, ретрай только удваивает задержку.
+            # ConnectTimeout here usually means a reused TLS connection
+            # in the shared pool went stale (Modal's edge dropped it while
+            # we still cached it). Drop the shared client so the next
+            # attempt opens a fresh connection. Retry up to 1 extra time
+            # — if the *fresh* handshake also times out, Modal LB really
+            # is unhappy and further retries only add latency.
             last_exc = exc
+            await aclose_shared_client()
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
             break
     if last_exc is not None and not (content_parts or reasoning_parts or tool_calls_acc):
         raise ModalProviderError(f"Modal failed after retries: {type(last_exc).__name__}: {last_exc}")
@@ -673,7 +690,13 @@ async def stream_chat(request: ChatCompletionRequest, model: LlmModel):
                 await asyncio.sleep(2 + attempt * 3)
                 continue
             except httpx.ConnectTimeout as exc:
+                # Same stale-pool recovery as in run_chat: drop the
+                # shared client and retry once with a fresh TLS handshake.
                 last_exc = exc
+                await aclose_shared_client()
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                    continue
                 break
             except Exception as exc:
                 last_exc = exc
